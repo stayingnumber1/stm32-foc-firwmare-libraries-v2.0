@@ -1,0 +1,1691 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.30.1.53127/W32 for ARM     04/Nov/2013  13:20:03 #
+# Copyright 1999-2011 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  thumb                                                    #
+#    Endian       =  little                                                   #
+#    Source file  =  D:\st\stm32 foc firwmare libraries                       #
+#                    v2.0\STM32_FOC_PMSM\src\stm32f10x_svpwm_1shunt.c         #
+#    Command line =  "D:\st\stm32 foc firwmare libraries                      #
+#                    v2.0\STM32_FOC_PMSM\src\stm32f10x_svpwm_1shunt.c" -D     #
+#                    VECT_TAB_FLASH -lCN "D:\st\stm32 foc firwmare libraries  #
+#                    v2.0\STM32_FOC_PMSM\EWARM\Debug\List\" --diag_suppress   #
+#                    Pa082 --diag_error Pe068,Pe069 -o "D:\st\stm32 foc       #
+#                    firwmare libraries v2.0\STM32_FOC_PMSM\EWARM\Debug\Obj\" #
+#                     --debug --endian=little --cpu=Cortex-M3 --fpu=None      #
+#                    --dlib_config D:\IAR\arm\INC\c\DLib_Config_Normal.h -I   #
+#                    "D:\st\stm32 foc firwmare libraries                      #
+#                    v2.0\STM32_FOC_PMSM\EWARM\..\" -I "D:\st\stm32 foc       #
+#                    firwmare libraries v2.0\STM32_FOC_PMSM\EWARM\..\..\STM32 #
+#                    F10XFWLIB\inc\" -I "D:\st\stm32 foc firwmare libraries   #
+#                    v2.0\STM32_FOC_PMSM\EWARM\..\inc\" -Ohs                  #
+#                    --use_c++_inline --require_prototypes                    #
+#    List file    =  D:\st\stm32 foc firwmare libraries                       #
+#                    v2.0\STM32_FOC_PMSM\EWARM\Debug\List\stm32f10x_svpwm_1sh #
+#                    unt.lst                                                  #
+#    Object file  =  D:\st\stm32 foc firwmare libraries                       #
+#                    v2.0\STM32_FOC_PMSM\EWARM\Debug\Obj\stm32f10x_svpwm_1shu #
+#                    nt.o                                                     #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+D:\st\stm32 foc firwmare libraries v2.0\STM32_FOC_PMSM\src\stm32f10x_svpwm_1shunt.c
+      1          /******************** (C) COPYRIGHT 2008 STMicroelectronics ********************
+      2          * File Name          : STM32x_svpwm_1shunt.c
+      3          * Author             : IMS Systems Lab
+      4          * Date First Issued  : Mar/08
+      5          * Description        : 1 shunt resistor current reading module
+      6          ********************************************************************************
+      7          * History:
+      8          * 29/05/08 v2.0
+      9          * 02/07/08 v2.0.1
+     10          * 03/07/08 v2.0.2
+     11          * 11/07/08 v2.0.3
+     12          ********************************************************************************
+     13          * THE PRESENT SOFTWARE WHICH IS FOR GUIDANCE ONLY AIMS AT PROVIDING CUSTOMERS
+     14          * WITH CODING INFORMATION REGARDING THEIR PRODUCTS IN ORDER FOR THEM TO SAVE TIME.
+     15          * AS A RESULT, STMICROELECTRONICS SHALL NOT BE HELD LIABLE FOR ANY DIRECT,
+     16          * INDIRECT OR CONSEQUENTIAL DAMAGES WITH RESPECT TO ANY CLAIMS ARISING FROM THE
+     17          * CONTENT OF SUCH SOFTWARE AND/OR THE USE MADE BY CUSTOMERS OF THE CODING
+     18          * INFORMATION CONTAINED HEREIN IN CONNECTION WITH THEIR PRODUCTS.
+     19          *
+     20          * THIS SOURCE CODE IS PROTECTED BY A LICENSE.
+     21          * FOR MORE INFORMATION PLEASE CAREFULLY READ THE LICENSE AGREEMENT FILE LOCATED
+     22          * IN THE ROOT DIRECTORY OF THIS FIRMWARE PACKAGE.
+     23          *******************************************************************************/
+     24          
+     25          #include "STM32F10x_MCconf.h"
+     26          
+     27          #ifdef SINGLE_SHUNT
+     28          
+     29          /* Includes-------------------------------------------------------------------*/
+     30          #include "stm32f10x_lib.h"
+     31          #include "stm32f10x_svpwm_1shunt.h"
+     32          #include "MC_Globals.h"
+     33          
+     34          /* Private typedef -----------------------------------------------------------*/
+     35          /* Private define ------------------------------------------------------------*/
+     36          
+     37          #define NB_CONVERSIONS 16
+     38          
+     39          #define SQRT_3		1.732051
+     40          #define T		(PWM_PERIOD * 4)
+     41          #define T_SQRT3         (u16)(T * SQRT_3)
+     42          
+     43          #define SECTOR_1	(u32)1
+     44          #define SECTOR_2	(u32)2
+     45          #define SECTOR_3	(u32)3
+     46          #define SECTOR_4	(u32)4
+     47          #define SECTOR_5	(u32)5
+     48          #define SECTOR_6	(u32)6
+     49          
+     50          #define REGULAR         ((u8)0)
+     51          #define BOUNDARY_1      ((u8)1)  // Two small, one big
+     52          #define BOUNDARY_2      ((u8)2)  // Two big, one small
+     53          #define BOUNDARY_3      ((u8)3)  // Three equal
+     54          
+     55          #define PHASE_B_ADC_CHANNEL     ADC_Channel_12
+     56          
+     57          #define ADC_PRE_EMPTION_PRIORITY 1
+     58          #define ADC_SUB_PRIORITY 0
+     59          
+     60          #define BRK_PRE_EMPTION_PRIORITY 0
+     61          #define BRK_SUB_PRIORITY 0
+     62          
+     63          #define TIM1_UP_PRE_EMPTION_PRIORITY 0
+     64          #define TIM1_UP_SUB_PRIORITY 0
+     65          
+     66          #define LOW_SIDE_POLARITY  TIM_OCIdleState_Reset
+     67          
+     68          // Direct address of the registers used by DMA
+     69          #define TIM1_CCR1_Address   0x40012C34
+     70          #define TIM1_CCR2_Address   0x40012C38
+     71          #define TIM1_CCR3_Address   0x40012C3C
+     72          #define TIM1_CCR4_Address   0x40012C40
+     73          #define TIM1_DMAR_Address   0x40012C4C
+     74          
+     75          #define CCMR1_OC1PE_BB    0x4225830C
+     76          #define CCMR1_OC2PE_BB    0x4225832C
+     77          #define CCMR2_OC3PE_BB    0x4225838C
+     78          
+     79          #define CH1NORMAL 0x0060
+     80          #define CH2NORMAL 0x6000
+     81          #define CH3NORMAL 0x0060
+     82          #define CH4NORMAL 0x7000
+     83          #define CH1TOGGLE 0x0030
+     84          #define CH2TOGGLE 0x3000
+     85          #define CH3TOGGLE 0x0030
+     86          #define CH4TOGGLE 0x3000
+     87          
+     88          /* Private macro -------------------------------------------------------------*/
+     89          /* Private variables ---------------------------------------------------------*/
+     90          u8  bSector;  
+     91          u16 hPhaseOffset=0;
+     92          
+     93          u8 bInverted_pwm=INVERT_NONE,bInverted_pwm_new=INVERT_NONE;
+     94          u8  bStatorFluxPos, bStatorFluxPosOld;
+     95          DUTYVALUESTYPE dvDutyValues;
+     96          CURRENTSAMPLEDTYPE csCurrentSampled;
+     97          u8 bError=0;
+     98          
+     99          s16 hCurrAOld,hCurrBOld,hCurrCOld;
+    100          s16 hDeltaA,hDeltaB,hDeltaC;
+    101          u8 bReadDelta;
+    102          
+    103          u16 hPreloadCCMR1Disable;
+    104          u16 hPreloadCCMR1Set;
+    105          u16 hPreloadCCMR2Disable;
+    106          u16 hPreloadCCMR2Set;
+    107             
+    108          u16 hCCDmaBuffCh1[4];
+    109          u16 hCCDmaBuffCh2[4];
+    110          u16 hCCDmaBuffCh3[4];
+    111          u16 hCCDmaBuffCh4[4];
+    112          
+    113          u16 hCCRBuff[4];
+    114          
+    115          u8 bStBd3 = 0;
+    116          u8 bDistEnab = 0;
+    117          
+    118          /* Private function prototypes -----------------------------------------------*/
+    119          
+    120          void SVPWM_InjectedConvConfig(void);
+    121          
+    122          /*******************************************************************************
+    123          * Function Name  : SVPWM_1ShuntInit
+    124          * Description    : It initializes PWM and ADC peripherals
+    125          * Input          : None
+    126          * Output         : None
+    127          * Return         : None
+    128          *******************************************************************************/
+    129          void SVPWM_1ShuntInit(void)
+    130          { 
+    131            ADC_InitTypeDef ADC_InitStructure;
+    132            TIM_TimeBaseInitTypeDef TIM1_TimeBaseStructure;
+    133            TIM_OCInitTypeDef TIM1_OCInitStructure;
+    134            TIM_BDTRInitTypeDef TIM1_BDTRInitStructure;
+    135            NVIC_InitTypeDef NVIC_InitStructure;
+    136            GPIO_InitTypeDef GPIO_InitStructure;
+    137            DMA_InitTypeDef DMA_InitStructure;
+    138          
+    139            /* ADC1, ADC2, DMA, GPIO, TIM1 clocks enabling -----------------------------*/
+    140            
+    141            /* ADCCLK = PCLK2/6 */
+    142            RCC_ADCCLKConfig(RCC_PCLK2_Div6);
+    143          
+    144            /* Enable DMA clock */
+    145            RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
+    146            
+    147            /* Enable GPIOA, GPIOC, GPIOE, AFIO clocks */
+    148            RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO | RCC_APB2Periph_GPIOA |
+    149                                   RCC_APB2Periph_GPIOC | RCC_APB2Periph_GPIOE, ENABLE);
+    150            /* Enable ADC1 clock */
+    151            RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
+    152          
+    153            /* Enable ADC2 clock */
+    154            RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC2, ENABLE); 
+    155             
+    156            /* Enable TIM1 clock */
+    157            RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE);
+    158               
+    159            /* ADC1, ADC2, PWM pins configurations -------------------------------------*/
+    160            GPIO_StructInit(&GPIO_InitStructure);
+    161            /****** Configure PC.00,01,2,3,4 (ADC Channels [10..14]) as analog input ****/
+    162            GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3 |GPIO_Pin_4;
+    163            GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AIN;
+    164            GPIO_Init(GPIOC, &GPIO_InitStructure);
+    165               
+    166            GPIO_StructInit(&GPIO_InitStructure);
+    167            /****** Configure PA.03 (ADC Channels [3]) as analog input ******/
+    168            GPIO_InitStructure.GPIO_Pin = GPIO_Pin_3;
+    169            GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AIN;
+    170            GPIO_Init(GPIOA, &GPIO_InitStructure);
+    171            
+    172            // After reset value of DMA buffers
+    173            hCCDmaBuffCh1[0] = PWM_PERIOD-HTMIN;
+    174            hCCDmaBuffCh1[1] = PWM_PERIOD-HTMIN;
+    175            hCCDmaBuffCh1[2] = PWM_PERIOD >> 1;
+    176            hCCDmaBuffCh1[3] = PWM_PERIOD >> 1;
+    177            ;
+    178            hCCDmaBuffCh2[0] = PWM_PERIOD-HTMIN;
+    179            hCCDmaBuffCh2[1] = PWM_PERIOD-HTMIN;
+    180            hCCDmaBuffCh2[2] = PWM_PERIOD >> 1;
+    181            hCCDmaBuffCh2[3] = PWM_PERIOD >> 1;
+    182            
+    183            hCCDmaBuffCh3[0] = PWM_PERIOD-HTMIN;
+    184            hCCDmaBuffCh3[1] = PWM_PERIOD-HTMIN;
+    185            hCCDmaBuffCh3[2] = PWM_PERIOD >> 1;
+    186            hCCDmaBuffCh3[3] = PWM_PERIOD >> 1;
+    187            
+    188            // Default Update DMA buffer Ch 1,2,3,4 after reset
+    189            hCCRBuff[0] = PWM_PERIOD >> 1;
+    190            hCCRBuff[1] = PWM_PERIOD >> 1;
+    191            hCCRBuff[2] = PWM_PERIOD >> 1;
+    192            hCCRBuff[3] = (PWM_PERIOD >> 1) - TBEFORE;
+    193            
+    194            // After reset value of dvDutyValues
+    195            dvDutyValues.hTimePhA = PWM_PERIOD >> 1;
+    196            dvDutyValues.hTimePhB = PWM_PERIOD >> 1;
+    197            dvDutyValues.hTimePhC = PWM_PERIOD >> 1;
+    198            
+    199            /* TIM1 Channel 1 toggle mode */
+    200            /* DMA Channel2 configuration ----------------------------------------------*/
+    201            DMA_DeInit(DMA1_Channel2);
+    202            DMA_InitStructure.DMA_PeripheralBaseAddr = (u32)TIM1_CCR1_Address;
+    203            DMA_InitStructure.DMA_MemoryBaseAddr = (u32)(hCCDmaBuffCh1);
+    204            DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralDST;
+    205            DMA_InitStructure.DMA_BufferSize = 4;
+    206            DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+    207            DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    208            DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+    209            DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+    210            DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+    211            DMA_InitStructure.DMA_Priority = DMA_Priority_High;
+    212            DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
+    213            DMA_Init(DMA1_Channel2, &DMA_InitStructure);
+    214            /* Enable DMA Channel2 */
+    215            //DMA_Cmd(DMA_Channel2, ENABLE);
+    216            DMA_Cmd(DMA1_Channel2, DISABLE);
+    217            
+    218            /* TIM1 Channel 2 toggle mode */
+    219            /* DMA Channel3 configuration ----------------------------------------------*/
+    220            DMA_DeInit(DMA1_Channel3);
+    221            DMA_InitStructure.DMA_PeripheralBaseAddr = (u32)TIM1_CCR2_Address;
+    222            DMA_InitStructure.DMA_MemoryBaseAddr = (u32)(hCCDmaBuffCh2);
+    223            DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralDST;
+    224            DMA_InitStructure.DMA_BufferSize = 4;
+    225            DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+    226            DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    227            DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+    228            DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+    229            DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+    230            DMA_InitStructure.DMA_Priority = DMA_Priority_High;
+    231            DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
+    232            DMA_Init(DMA1_Channel3, &DMA_InitStructure);
+    233            /* Enable DMA Channel3 */
+    234            //DMA_Cmd(DMA_Channel3, ENABLE);
+    235            DMA_Cmd(DMA1_Channel3, DISABLE);
+    236          
+    237            /* TIM1 Channel 3 toggle mode */
+    238            /* DMA Channel6 configuration ----------------------------------------------*/
+    239            DMA_DeInit(DMA1_Channel6);
+    240            DMA_InitStructure.DMA_PeripheralBaseAddr = (u32)TIM1_CCR3_Address;
+    241            DMA_InitStructure.DMA_MemoryBaseAddr = (u32)(hCCDmaBuffCh3);
+    242            DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralDST;
+    243            DMA_InitStructure.DMA_BufferSize = 4;
+    244            DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+    245            DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    246            DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+    247            DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+    248            DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+    249            DMA_InitStructure.DMA_Priority = DMA_Priority_High;
+    250            DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
+    251            DMA_Init(DMA1_Channel6, &DMA_InitStructure);
+    252            /* Enable DMA Channel6 */
+    253            DMA_Cmd(DMA1_Channel6, DISABLE);
+    254            
+    255            /* TIM1 Channel 4 PWM2 or toggle mode */
+    256            /* DMA channel4 configuration */
+    257            DMA_DeInit(DMA1_Channel4);
+    258            DMA_InitStructure.DMA_PeripheralBaseAddr = (u32)TIM1_CCR4_Address;
+    259            DMA_InitStructure.DMA_MemoryBaseAddr = (u32)(hCCDmaBuffCh4);
+    260            DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralDST;
+    261            DMA_InitStructure.DMA_BufferSize = 2;
+    262            DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+    263            DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    264            DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+    265            DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+    266            DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+    267            DMA_InitStructure.DMA_Priority = DMA_Priority_High;
+    268            DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
+    269            DMA_Init(DMA1_Channel4, &DMA_InitStructure);
+    270            
+    271            DMA_Cmd(DMA1_Channel4, ENABLE);
+    272            
+    273            /* DMA TIM1 update configuration */
+    274            DMA_DeInit(DMA1_Channel5);
+    275            DMA_InitStructure.DMA_PeripheralBaseAddr = (u32)TIM1_DMAR_Address; 
+    276            DMA_InitStructure.DMA_MemoryBaseAddr = (u32)(hCCRBuff);
+    277            DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralDST;
+    278            DMA_InitStructure.DMA_BufferSize = 4;
+    279            DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+    280            DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+    281            DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+    282            DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+    283            DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+    284            DMA_InitStructure.DMA_Priority = DMA_Priority_High;
+    285            DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
+    286            DMA_Init(DMA1_Channel5, &DMA_InitStructure);
+    287            
+    288            DMA_Cmd(DMA1_Channel5, ENABLE);
+    289             
+    290            /* TIM1 Peripheral Configuration -------------------------------------------*/
+    291            /* TIM1 Registers reset */
+    292            TIM_DeInit(TIM1);
+    293            TIM_TimeBaseStructInit(&TIM1_TimeBaseStructure);
+    294            /* Time Base configuration */
+    295            TIM1_TimeBaseStructure.TIM_Prescaler = 0x0;
+    296            TIM1_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_CenterAligned3;
+    297            TIM1_TimeBaseStructure.TIM_Period = PWM_PERIOD;
+    298            TIM1_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV2;
+    299            
+    300            // Initial condition is REP=0 to set the UPDATE only on the underflow
+    301            TIM1_TimeBaseStructure.TIM_RepetitionCounter = REP_RATE;
+    302            TIM_TimeBaseInit(TIM1, &TIM1_TimeBaseStructure);
+    303            
+    304            TIM_OCStructInit(&TIM1_OCInitStructure);
+    305            /* Channel 1, 2,3 in PWM mode */
+    306            TIM1_OCInitStructure.TIM_OCMode = TIM_OCMode_PWM1; 
+    307            TIM1_OCInitStructure.TIM_OutputState = TIM_OutputState_Enable; 
+    308            TIM1_OCInitStructure.TIM_OutputNState = TIM_OutputNState_Enable;                  
+    309            TIM1_OCInitStructure.TIM_Pulse = PWM_PERIOD >> 1; //dummy value
+    310            TIM1_OCInitStructure.TIM_OCPolarity = TIM_OCPolarity_High; 
+    311            TIM1_OCInitStructure.TIM_OCNPolarity = TIM_OCNPolarity_High;         
+    312            TIM1_OCInitStructure.TIM_OCIdleState = TIM_OCIdleState_Reset;
+    313            TIM1_OCInitStructure.TIM_OCNIdleState = LOW_SIDE_POLARITY;          
+    314            
+    315            TIM_OC1Init(TIM1, &TIM1_OCInitStructure); 
+    316            TIM_OC3Init(TIM1, &TIM1_OCInitStructure);
+    317            TIM_OC2Init(TIM1, &TIM1_OCInitStructure);
+    318          
+    319            /*Timer1 alternate function full remapping*/
+    320            GPIO_PinRemapConfig(GPIO_FullRemap_TIM1,ENABLE); 
+    321            
+    322            GPIO_StructInit(&GPIO_InitStructure);
+    323            /* GPIOE Configuration: Channel 1, 1N, 2, 2N, 3, 3N and 4 Output */
+    324            GPIO_InitStructure.GPIO_Pin = GPIO_Pin_8 | GPIO_Pin_9 | GPIO_Pin_10 | 
+    325                                          GPIO_Pin_11 | GPIO_Pin_12 | GPIO_Pin_13 | GPIO_Pin_14;
+    326            GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
+    327            GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    328            GPIO_Init(GPIOE, &GPIO_InitStructure); 
+    329            
+    330            /* Lock GPIOE Pin9 and Pin11 Pin 13 (High sides) */
+    331            GPIO_PinLockConfig(GPIOE, GPIO_Pin_9 | GPIO_Pin_11 | GPIO_Pin_13);
+    332          
+    333            GPIO_StructInit(&GPIO_InitStructure);
+    334            /* GPIOE Configuration: BKIN pin */   
+    335            GPIO_InitStructure.GPIO_Pin = GPIO_Pin_15;
+    336            GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;
+    337            GPIO_Init(GPIOE, &GPIO_InitStructure);
+    338            
+    339            TIM_OCStructInit(&TIM1_OCInitStructure);
+    340            /* Channel 4 Configuration in OC */
+    341            TIM1_OCInitStructure.TIM_OCMode = TIM_OCMode_PWM2;  
+    342            TIM1_OCInitStructure.TIM_OutputState = TIM_OutputState_Enable; 
+    343            TIM1_OCInitStructure.TIM_OutputNState = TIM_OutputNState_Disable;                  
+    344            TIM1_OCInitStructure.TIM_Pulse = PWM_PERIOD - TMIN - TBEFORE; 
+    345            
+    346            TIM1_OCInitStructure.TIM_OCPolarity = TIM_OCPolarity_High; 
+    347            TIM1_OCInitStructure.TIM_OCNPolarity = TIM_OCNPolarity_Low;         
+    348            TIM1_OCInitStructure.TIM_OCIdleState = TIM_OCIdleState_Reset;
+    349            TIM1_OCInitStructure.TIM_OCNIdleState = LOW_SIDE_POLARITY;            
+    350            
+    351            TIM_OC4Init(TIM1, &TIM1_OCInitStructure);
+    352            
+    353            /* Enables the TIM1 Preload on CC1 Register */
+    354            TIM_OC1PreloadConfig(TIM1, TIM_OCPreload_Disable);
+    355            /* Enables the TIM1 Preload on CC2 Register */
+    356            TIM_OC2PreloadConfig(TIM1, TIM_OCPreload_Disable);
+    357            /* Enables the TIM1 Preload on CC3 Register */
+    358            TIM_OC3PreloadConfig(TIM1, TIM_OCPreload_Disable);
+    359            /* Enables the TIM1 Preload on CC4 Register */
+    360            TIM_OC4PreloadConfig(TIM1, TIM_OCPreload_Disable);
+    361            
+    362            /* Automatic Output enable, Break, dead time and lock configuration*/
+    363            TIM1_BDTRInitStructure.TIM_OSSRState = TIM_OSSRState_Enable;
+    364            TIM1_BDTRInitStructure.TIM_OSSIState = TIM_OSSIState_Enable;
+    365            TIM1_BDTRInitStructure.TIM_LOCKLevel = TIM_LOCKLevel_1; 
+    366            TIM1_BDTRInitStructure.TIM_DeadTime = DEADTIME;
+    367            TIM1_BDTRInitStructure.TIM_Break = TIM_Break_Enable;
+    368            TIM1_BDTRInitStructure.TIM_BreakPolarity = TIM_BreakPolarity_Low;
+    369            TIM1_BDTRInitStructure.TIM_AutomaticOutput = TIM_AutomaticOutput_Disable;
+    370          
+    371            TIM_BDTRConfig(TIM1, &TIM1_BDTRInitStructure);
+    372          
+    373            TIM_SelectOutputTrigger(TIM1, TIM_TRGOSource_Update);
+    374            
+    375            // Clear Break Flag and enable interrupt
+    376            TIM_ClearITPendingBit(TIM1, TIM_IT_Break);
+    377            TIM_ITConfig(TIM1, TIM_IT_Break,ENABLE);
+    378            
+    379            /* TIM1 counter enable */
+    380            TIM_Cmd(TIM1, ENABLE);
+    381            
+    382            // Disnable update interrupt
+    383            TIM_ITConfig(TIM1, TIM_IT_Update, DISABLE);
+    384            
+    385            // Resynch to have the Update evend during Undeflow
+    386            TIM_GenerateEvent(TIM1, TIM_EventSource_Update);
+    387            
+    388            // Enable DMA event
+    389            TIM_DMACmd(TIM1, TIM_DMA_CC1, DISABLE);
+    390            TIM_DMACmd(TIM1, TIM_DMA_CC2, DISABLE);
+    391            TIM_DMACmd(TIM1, TIM_DMA_CC3, DISABLE);
+    392            TIM_DMACmd(TIM1, TIM_DMA_Update,ENABLE);
+    393            
+    394            TIM_DMAConfig(TIM1, TIM_DMABase_CCR1, TIM_DMABurstLength_4Bytes);
+    395            
+    396            // Sets the disable preload vars for CCMR
+    397            hPreloadCCMR1Disable = TIM1->CCMR1 & 0x8F8F;
+    398            hPreloadCCMR2Disable = TIM1->CCMR2 & 0x8F8F;
+    399             
+    400            /* ADC1 registers reset ----------------------------------------------------*/
+    401            ADC_DeInit(ADC1);
+    402            /* ADC1 registers reset ----------------------------------------------------*/
+    403            ADC_DeInit(ADC2);
+    404            
+    405            /* Enable ADC1 */
+    406            ADC_Cmd(ADC1, ENABLE);
+    407            /* Enable ADC2 */
+    408            ADC_Cmd(ADC2, ENABLE);
+    409            
+    410            /* ADC1 configuration ------------------------------------------------------*/
+    411            ADC_StructInit(&ADC_InitStructure);
+    412            ADC_InitStructure.ADC_Mode = ADC_Mode_Independent;
+    413            ADC_InitStructure.ADC_ScanConvMode = DISABLE;
+    414            ADC_InitStructure.ADC_ContinuousConvMode = DISABLE;
+    415            ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None;
+    416            ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Left;
+    417            ADC_InitStructure.ADC_NbrOfChannel = 1;
+    418            ADC_Init(ADC1, &ADC_InitStructure);
+    419            
+    420            /* ADC2 Configuration ------------------------------------------------------*/
+    421            ADC_StructInit(&ADC_InitStructure);  
+    422            ADC_InitStructure.ADC_Mode = ADC_Mode_Independent;
+    423            ADC_InitStructure.ADC_ScanConvMode = DISABLE;
+    424            ADC_InitStructure.ADC_ContinuousConvMode = DISABLE;
+    425            ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None;
+    426            ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Left;
+    427            ADC_InitStructure.ADC_NbrOfChannel = 1;
+    428            ADC_Init(ADC2, &ADC_InitStructure);
+    429            
+    430            ADC_InjectedDiscModeCmd(ADC1,ENABLE);
+    431            ADC_InjectedDiscModeCmd(ADC2,ENABLE);
+    432            
+    433            // Start calibration of ADC1
+    434            ADC_StartCalibration(ADC1);
+    435            // Start calibration of ADC2
+    436            ADC_StartCalibration(ADC2);
+    437            
+    438            // Wait for the end of ADCs calibration 
+    439            while (ADC_GetCalibrationStatus(ADC1) & ADC_GetCalibrationStatus(ADC2))
+    440            {
+    441            }
+    442            
+    443            SVPWM_1ShuntCurrentReadingCalibration();
+    444              
+    445            /* Configure one bit for preemption priority */
+    446            NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
+    447            
+    448            NVIC_StructInit(&NVIC_InitStructure);
+    449            /* Enable the ADC Interrupt */
+    450            NVIC_InitStructure.NVIC_IRQChannel = ADC1_2_IRQChannel;
+    451            NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = ADC_PRE_EMPTION_PRIORITY;
+    452            NVIC_InitStructure.NVIC_IRQChannelSubPriority = ADC_SUB_PRIORITY;
+    453            NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+    454            NVIC_Init(&NVIC_InitStructure);
+    455            
+    456            /* Enable the Update Interrupt */
+    457            NVIC_InitStructure.NVIC_IRQChannel = TIM1_UP_IRQChannel;
+    458            NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = TIM1_UP_PRE_EMPTION_PRIORITY;
+    459            NVIC_InitStructure.NVIC_IRQChannelSubPriority = TIM1_UP_SUB_PRIORITY;
+    460            NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+    461            NVIC_Init(&NVIC_InitStructure);
+    462              
+    463            /* Enable the TIM1 BRK Interrupt */
+    464            NVIC_InitStructure.NVIC_IRQChannel = TIM1_BRK_IRQChannel;
+    465            NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = BRK_PRE_EMPTION_PRIORITY;
+    466            NVIC_InitStructure.NVIC_IRQChannelSubPriority = BRK_SUB_PRIORITY;
+    467            NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+    468            NVIC_Init(&NVIC_InitStructure);
+    469            
+    470            // Default value of DutyValues
+    471            dvDutyValues.hTimeSmp1 = (PWM_PERIOD >> 1) - TBEFORE;
+    472            dvDutyValues.hTimeSmp2 = (PWM_PERIOD >> 1) + TAFTER;
+    473          } 
+    474          
+    475          /*******************************************************************************
+    476          * Function Name  : SVPWM_1ShuntCurrentReadingCalibration
+    477          * Description    : Store zero current converted values for current reading 
+    478                             network offset compensation in case of 1 shunt resistors 
+    479          * Input          : None
+    480          * Output         : None
+    481          * Return         : None
+    482          *******************************************************************************/
+    483          void SVPWM_1ShuntCurrentReadingCalibration(void)
+    484          {
+    485            static u16 bIndex;
+    486            
+    487            /* ADC1 Injected group of conversions end interrupt disabling */
+    488            ADC_ITConfig(ADC1, ADC_IT_JEOC, DISABLE);
+    489            
+    490            hPhaseOffset=0;
+    491            
+    492            /* ADC1 Injected conversions trigger is given by software and enabled */ 
+    493            ADC_ExternalTrigInjectedConvConfig(ADC1, ADC_ExternalTrigInjecConv_T1_TRGO);  
+    494            ADC_ExternalTrigInjectedConvCmd(ADC1,ENABLE); 
+    495            
+    496            /* ADC1 Injected conversions configuration */ 
+    497            ADC_InjectedSequencerLengthConfig(ADC1,2);
+    498            ADC_InjectedChannelConfig(ADC1, PHASE_B_ADC_CHANNEL, 1,SAMPLING_TIME_CK);
+    499            ADC_InjectedChannelConfig(ADC1, PHASE_B_ADC_CHANNEL, 2,SAMPLING_TIME_CK);
+    500          
+    501            /* Clear the ADC1 JEOC pending flag */
+    502            ADC_ClearFlag(ADC1, ADC_FLAG_JEOC);  
+    503              
+    504            /* ADC Channel used for current reading are read 
+    505               in order to get zero currents ADC values*/ 
+    506            for(bIndex=0; bIndex <NB_CONVERSIONS; bIndex++)
+    507            {
+    508              while(!ADC_GetFlagStatus(ADC1,ADC_FLAG_JEOC)) { }
+    509              
+    510              hPhaseOffset += (ADC_GetInjectedConversionValue(ADC1,ADC_InjectedChannel_1)>>3);
+    511                      
+    512              /* Clear the ADC1 JEOC pending flag */
+    513              ADC_ClearFlag(ADC1, ADC_FLAG_JEOC);    
+    514            }
+    515            
+    516            SVPWM_InjectedConvConfig();  
+    517          }
+    518          
+    519          /*******************************************************************************
+    520          * Function Name  : SVPWM_InjectedConvConfig
+    521          * Description    : This function configure ADC1 for 1 shunt current 
+    522          *                  reading and ADC2  temperature and voltage feedbcak after a 
+    523          *                  calibration, it also setup the DMA and the default value of the 
+    524          *                 variables after the start command
+    525          * Input          : None
+    526          * Output         : None
+    527          * Return         : None
+    528          *******************************************************************************/
+    529          void SVPWM_InjectedConvConfig(void)
+    530          {  
+    531            /* ADC2 Injected conversions configuration */ 
+    532            ADC_InjectedSequencerLengthConfig(ADC2,2);
+    533            ADC_InjectedChannelConfig(ADC2, TEMP_FDBK_CHANNEL, 1,SAMPLING_TIME_CK);
+    534            ADC_InjectedChannelConfig(ADC2, BUS_VOLT_FDBK_CHANNEL, 2,SAMPLING_TIME_CK);
+    535            
+    536            /* ADC2 Injected conversions trigger is TIM1 TRGO */ 
+    537            ADC_ExternalTrigInjectedConvConfig(ADC2, ADC_ExternalTrigInjecConv_T1_TRGO);
+    538            ADC_ExternalTrigInjectedConvCmd(ADC2,ENABLE);
+    539            
+    540            /* Bus voltage protection initialization*/                            
+    541            ADC_AnalogWatchdogCmd(ADC2,ADC_AnalogWatchdog_SingleInjecEnable);
+    542            ADC_AnalogWatchdogSingleChannelConfig(ADC2,BUS_VOLT_FDBK_CHANNEL);
+    543            ADC_AnalogWatchdogThresholdsConfig(ADC2,OVERVOLTAGE_THRESHOLD>>3,0x00);
+    544            
+    545            /* ADC1 Injected group of conversions end and Analog Watchdog interrupts
+    546                                                                               enabling */
+    547            ADC_ITConfig(ADC2, ADC_IT_AWD, ENABLE);
+    548            ADC_ITConfig(ADC1, ADC_IT_JEOC, ENABLE);
+    549            
+    550          
+    551            // Default value of DutyValues
+    552            dvDutyValues.hTimeSmp1 = (PWM_PERIOD >> 1) - TBEFORE;
+    553            dvDutyValues.hTimeSmp2 = (PWM_PERIOD >> 1) + TAFTER;
+    554            
+    555            // Default value of sampling point
+    556            hCCDmaBuffCh4[0] = dvDutyValues.hTimeSmp2; // Second point 
+    557            hCCDmaBuffCh4[1] = dvDutyValues.hTimeSmp2;
+    558            hCCDmaBuffCh4[2] = dvDutyValues.hTimeSmp1; // First point
+    559            hCCDmaBuffCh4[3] = dvDutyValues.hTimeSmp1;
+    560          
+    561            // Set TIM1 CCx start value
+    562            TIM1->CCR1 = PWM_PERIOD >> 1;
+    563            TIM1->CCR2 = PWM_PERIOD >> 1;
+    564            TIM1->CCR3 = PWM_PERIOD >> 1;
+    565            TIM1->CCR4 = (PWM_PERIOD >> 1) - TBEFORE;
+    566            
+    567            // Default Update DMA buffer Ch 1,2,3,4 after reset
+    568            hCCRBuff[0] = PWM_PERIOD >> 1;
+    569            hCCRBuff[1] = PWM_PERIOD >> 1;
+    570            hCCRBuff[2] = PWM_PERIOD >> 1;
+    571            hCCRBuff[3] = (PWM_PERIOD >> 1) - TBEFORE;
+    572            
+    573            TIM_DMACmd(TIM1, TIM_DMA_CC4, ENABLE);
+    574            
+    575            // After start value of DMA buffers
+    576            hCCDmaBuffCh1[0] = PWM_PERIOD-HTMIN;
+    577            hCCDmaBuffCh1[1] = PWM_PERIOD-HTMIN;
+    578            hCCDmaBuffCh1[2] = PWM_PERIOD >> 1;
+    579            hCCDmaBuffCh1[3] = PWM_PERIOD >> 1;
+    580            
+    581            hCCDmaBuffCh2[0] = PWM_PERIOD-HTMIN;
+    582            hCCDmaBuffCh2[1] = PWM_PERIOD-HTMIN;
+    583            hCCDmaBuffCh2[2] = PWM_PERIOD >> 1;
+    584            hCCDmaBuffCh2[3] = PWM_PERIOD >> 1;
+    585            
+    586            hCCDmaBuffCh3[0] = PWM_PERIOD-HTMIN;
+    587            hCCDmaBuffCh3[1] = PWM_PERIOD-HTMIN;
+    588            hCCDmaBuffCh3[2] = PWM_PERIOD >> 1;
+    589            hCCDmaBuffCh3[3] = PWM_PERIOD >> 1;
+    590            
+    591            // After start value of dvDutyValues
+    592            dvDutyValues.hTimePhA = PWM_PERIOD >> 1;
+    593            dvDutyValues.hTimePhB = PWM_PERIOD >> 1;
+    594            dvDutyValues.hTimePhC = PWM_PERIOD >> 1;
+    595            
+    596            // Set the default previous value of Phase A,B,C current
+    597            hCurrAOld=0;
+    598            hCurrBOld=0;
+    599            hCurrCOld=0;
+    600            
+    601            hDeltaA = 0;
+    602            hDeltaB = 0;
+    603            hDeltaC = 0;
+    604            bReadDelta = 0;
+    605            bStatorFluxPosOld = REGULAR;
+    606            bStatorFluxPos = REGULAR;
+    607          }
+    608          
+    609          /*******************************************************************************
+    610          * Function Name  : SVPWM_1ShuntCalcDutyCycles
+    611          * Description    :  Implementation of the single shunt algorithm to setup the 
+    612          TIM1 register and DMA buffers values for the next PWM period.
+    613          * Input          : Stat_Volt_alfa_beta
+    614          * Output         : None
+    615          * Return         : None
+    616          *******************************************************************************/
+    617          void SVPWM_1ShuntCalcDutyCycles (Volt_Components Stat_Volt_Input)
+    618          {
+    619              s32 wX, wY, wZ, wUAlpha, wUBeta;
+    620              s16 hDeltaDuty[2];
+    621              u16 hDutyV[4]; // the 4th element is the swap tmp
+    622              
+    623          /*******************************************************************************
+    624          * Function Name  : SVPWM_1ShuntGetDuty
+    625          * Description    : Computes the three duty cycle values corresponding to the input value
+    626                                  using space vector modulation techinque
+    627          * Input          : Stat_Volt_alfa_beta
+    628          * Output         : None
+    629          * Return         : None
+    630          *******************************************************************************/
+    631              //SVPWM_1ShuntGetDuty(Stat_Volt_Input);
+    632              wUAlpha = Stat_Volt_Input.qV_Component1 * T_SQRT3 ;
+    633              wUBeta = -(Stat_Volt_Input.qV_Component2 * T);
+    634            
+    635              wX = wUBeta;
+    636              wY = (wUBeta + wUAlpha)/2;
+    637              wZ = (wUBeta - wUAlpha)/2;
+    638               
+    639              // Sector calculation from wX, wY, wZ
+    640               if (wY<0)
+    641               {
+    642                  if (wZ<0)
+    643                  {
+    644                    bSector = SECTOR_5;
+    645                  }
+    646                  else // wZ >= 0
+    647                    if (wX<=0)
+    648                    {
+    649                      bSector = SECTOR_4;
+    650                    }
+    651                    else // wX > 0
+    652                    {
+    653                      bSector = SECTOR_3;
+    654                    }
+    655               }
+    656               else // wY > 0
+    657               {
+    658                 if (wZ>=0)
+    659                 {
+    660                   bSector = SECTOR_2;
+    661                 }
+    662                 else // wZ < 0
+    663                   if (wX<=0)
+    664                   {  
+    665                     bSector = SECTOR_6;
+    666                   }
+    667                   else // wX > 0
+    668                   {
+    669                     bSector = SECTOR_1;
+    670                   }
+    671                }
+    672               
+    673               /* Duty cycles computation */
+    674              switch(bSector)
+    675              {  
+    676                case SECTOR_1:
+    677                    dvDutyValues.hTimePhA = (T/8) + ((((T + wX) - wZ)/2)/131072);
+    678                    dvDutyValues.hTimePhB = dvDutyValues.hTimePhA + wZ/131072;
+    679                    dvDutyValues.hTimePhC = dvDutyValues.hTimePhB - wX/131072;
+    680                            break;
+    681                case SECTOR_2:
+    682                    dvDutyValues.hTimePhA = (T/8) + ((((T + wY) - wZ)/2)/131072);
+    683                    dvDutyValues.hTimePhB = dvDutyValues.hTimePhA + wZ/131072;
+    684                    dvDutyValues.hTimePhC = dvDutyValues.hTimePhA - wY/131072;
+    685                    break;
+    686                case SECTOR_3:
+    687                    dvDutyValues.hTimePhA = (T/8) + ((((T - wX) + wY)/2)/131072);
+    688                    dvDutyValues.hTimePhC = dvDutyValues.hTimePhA - wY/131072;
+    689                    dvDutyValues.hTimePhB = dvDutyValues.hTimePhC + wX/131072;
+    690                    break;
+    691                case SECTOR_4:
+    692                    dvDutyValues.hTimePhA = (T/8) + ((((T + wX) - wZ)/2)/131072);
+    693                    dvDutyValues.hTimePhB = dvDutyValues.hTimePhA + wZ/131072;
+    694                    dvDutyValues.hTimePhC = dvDutyValues.hTimePhB - wX/131072;
+    695                    break;  
+    696                case SECTOR_5:
+    697                    dvDutyValues.hTimePhA = (T/8) + ((((T + wY) - wZ)/2)/131072);
+    698                    dvDutyValues.hTimePhB = dvDutyValues.hTimePhA + wZ/131072;
+    699                    dvDutyValues.hTimePhC = dvDutyValues.hTimePhA - wY/131072;
+    700                        break;
+    701                case SECTOR_6:
+    702                    dvDutyValues.hTimePhA = (T/8) + ((((T - wX) + wY)/2)/131072);
+    703                    dvDutyValues.hTimePhC = dvDutyValues.hTimePhA - wY/131072;
+    704                    dvDutyValues.hTimePhB = dvDutyValues.hTimePhC + wX/131072;
+    705                    break;
+    706                default:
+    707                    break;
+    708              }
+    709              
+    710              if (bDistEnab == 1)
+    711              {
+    712                bStatorFluxPosOld = bStatorFluxPos;
+    713              
+    714          /*******************************************************************************
+    715          * Function Name  : SVPWM_1GetStatorFluxPos
+    716          * Description    :  Compute the stator vector position 
+    717                                  REGULAR if stator vector lies in regular region
+    718                                  BOUNDARY_1 if stator vector lies in boundary region 1 (two small, one big)
+    719                                  BOUNDARY_2 if stator vector lies in boundary region 2 (two big, one small)
+    720                                  BOUNDARY_3 if stator vector lies in boundary region 3 (three equal)
+    721          * Input           : None
+    722          * Output         : None
+    723          * Return         : None
+    724          *******************************************************************************/
+    725                //bStatorFluxPos = SVPWM_1GetStatorFluxPos(); 
+    726                hDutyV[0] = dvDutyValues.hTimePhA;
+    727                hDutyV[1] = dvDutyValues.hTimePhB;
+    728                hDutyV[2] = dvDutyValues.hTimePhC;
+    729                
+    730                // Sort ascendant
+    731                if (hDutyV[0] > hDutyV[1])
+    732                {
+    733                  // Swap [0] [1]
+    734                  hDutyV[3] = hDutyV[0];
+    735                  hDutyV[0] = hDutyV[1];
+    736                  hDutyV[1] = hDutyV[3];
+    737                }
+    738                if (hDutyV[0] > hDutyV[2])
+    739                {
+    740                  // Swap [0] [2]
+    741                  hDutyV[3] = hDutyV[0];
+    742                  hDutyV[0] = hDutyV[2];
+    743                  hDutyV[2] = hDutyV[3];
+    744                }
+    745                if (hDutyV[1] > hDutyV[2])
+    746                {
+    747                  // Swap [1] [2]
+    748                  hDutyV[3] = hDutyV[1];
+    749                  hDutyV[1] = hDutyV[2];
+    750                  hDutyV[2] = hDutyV[3];
+    751                }
+    752                
+    753                // Compute delta duty
+    754                hDeltaDuty[0] = (s16)(hDutyV[1]) - (s16)(hDutyV[0]);
+    755                hDeltaDuty[1] = (s16)(hDutyV[2]) - (s16)(hDutyV[1]);
+    756                
+    757                // Check region
+    758                if ((hDeltaDuty[1]>TMIN) && (hDeltaDuty[0]<=TMIN))
+    759                  bStatorFluxPos = BOUNDARY_2;
+    760                else if ((hDeltaDuty[1]<=TMIN) && (hDeltaDuty[0]>TMIN))
+    761                  bStatorFluxPos = BOUNDARY_1;
+    762                else if ((hDeltaDuty[1]>TMIN) && (hDeltaDuty[0]>TMIN))
+    763                  bStatorFluxPos = REGULAR;    
+    764                else
+    765                  bStatorFluxPos = BOUNDARY_3;
+    766              
+    767          /*******************************************************************************
+    768          * Function Name  : SVPWM_1PWMDutyAdj
+    769          * Description    :  Compute the PWM channel that must be distorted and updates
+    770                              the value od duty cycle registers
+    771                                          
+    772          * Input           : None
+    773          * Output         : None
+    774          * Return         : None
+    775          *******************************************************************************/    
+    776                //SVPWM_1PWMDutyAdj();
+    777                if (bStatorFluxPos == REGULAR)
+    778                {
+    779                        bInverted_pwm_new = INVERT_NONE;
+    780                }
+    781                else if (bStatorFluxPos == BOUNDARY_1) // Adjust the lower
+    782                {
+    783                  switch (bSector)
+    784                  {
+    785                          case SECTOR_5:
+    786                          case SECTOR_6:
+    787                                  bInverted_pwm_new = INVERT_A;
+    788                                  dvDutyValues.hTimePhA -=HTMIN;
+    789                                  break;
+    790                          case SECTOR_2:
+    791                          case SECTOR_1:
+    792                                  bInverted_pwm_new = INVERT_B;
+    793                                  dvDutyValues.hTimePhB -=HTMIN;
+    794                                  break;
+    795                          case SECTOR_4:
+    796                          case SECTOR_3:
+    797                                  bInverted_pwm_new = INVERT_C;
+    798                                  dvDutyValues.hTimePhC -=HTMIN;
+    799                                  break;
+    800                  }
+    801                }
+    802                else if (bStatorFluxPos == BOUNDARY_2) // Adjust the middler
+    803                {
+    804                  switch (bSector)
+    805                  {
+    806                          case SECTOR_4:
+    807                          case SECTOR_5: // Inverto sempre B
+    808                                  bInverted_pwm_new = INVERT_B;
+    809                                  dvDutyValues.hTimePhB -=HTMIN;
+    810                                  break;
+    811                          case SECTOR_2:
+    812                          case SECTOR_3: // Inverto sempre A
+    813                                  bInverted_pwm_new = INVERT_A;
+    814                                  dvDutyValues.hTimePhA -=HTMIN;
+    815                                  break;
+    816                          case SECTOR_6:
+    817                          case SECTOR_1: // Inverto sempre C
+    818                                  bInverted_pwm_new = INVERT_C;
+    819                                  dvDutyValues.hTimePhC -=HTMIN;
+    820                                  break;
+    821                  }
+    822                }
+    823                else if (bStatorFluxPos == BOUNDARY_3)
+    824                {
+    825                  if (bStBd3 == 0)
+    826                  {
+    827                    bInverted_pwm_new = INVERT_A;
+    828                    dvDutyValues.hTimePhA -=HTMIN;
+    829                    bStBd3 = 1;
+    830                  } 
+    831                  else
+    832                  {
+    833                    bInverted_pwm_new = INVERT_B;
+    834                    dvDutyValues.hTimePhB -=HTMIN;
+    835                    bStBd3 = 0;
+    836                  }
+    837                }
+    838                
+    839                if (bInverted_pwm_new != INVERT_NONE)
+    840                {
+    841                  // Check for negative values of duty register
+    842                  if (dvDutyValues.hTimePhA > 0xEFFF)
+    843                    dvDutyValues.hTimePhA = DMABURSTMIN_A;
+    844                  if (dvDutyValues.hTimePhB > 0xEFFF)
+    845                    dvDutyValues.hTimePhB = DMABURSTMIN_B;
+    846                  if (dvDutyValues.hTimePhC > 0xEFFF)
+    847                    dvDutyValues.hTimePhC = DMABURSTMIN_C;
+    848                  
+    849                  // Duty adjust to avoid commutation inside Update Handler
+    850                  if ((dvDutyValues.hTimePhA > MINTIMCNTUPHAND) && (dvDutyValues.hTimePhA < MIDTIMCNTUPHAND))
+    851                      dvDutyValues.hTimePhA = MINTIMCNTUPHAND;
+    852                  if ((dvDutyValues.hTimePhA >= MIDTIMCNTUPHAND) && (dvDutyValues.hTimePhA < MAXTIMCNTUPHAND))
+    853                      dvDutyValues.hTimePhA = MAXTIMCNTUPHAND;     
+    854                  if ((dvDutyValues.hTimePhB > MINTIMCNTUPHAND) && (dvDutyValues.hTimePhB < MIDTIMCNTUPHAND))
+    855                      dvDutyValues.hTimePhB = MINTIMCNTUPHAND;
+    856                  if ((dvDutyValues.hTimePhB >= MIDTIMCNTUPHAND) && (dvDutyValues.hTimePhB < MAXTIMCNTUPHAND))
+    857                      dvDutyValues.hTimePhB = MAXTIMCNTUPHAND;
+    858                  if ((dvDutyValues.hTimePhC > MINTIMCNTUPHAND) && (dvDutyValues.hTimePhC < MIDTIMCNTUPHAND))
+    859                      dvDutyValues.hTimePhC = MINTIMCNTUPHAND;
+    860                  if ((dvDutyValues.hTimePhC >= MIDTIMCNTUPHAND) && (dvDutyValues.hTimePhC < MAXTIMCNTUPHAND))
+    861                      dvDutyValues.hTimePhC = MAXTIMCNTUPHAND;
+    862                }
+    863              
+    864              /*******************************************************************************
+    865          * Function Name  : SVPWM_1PWMSetSamplingPoints
+    866          * Description    :  Compute the sampling point and the related phase sampled 	
+    867          * Input           : None
+    868          * Output         : None
+    869          * Return         : None
+    870          *******************************************************************************/
+    871                //SVPWM_1PWMSetSamplingPoints();
+    872                // Reset error state & sampling before
+    873                bError = 0;
+    874                
+    875                if (bStatorFluxPos == REGULAR) // Regual zone
+    876                {
+    877                  // First point
+    878                  if ((hDutyV[1] - hDutyV[0] - TDEAD)> MAX_TRTS)
+    879                  {
+    880                    dvDutyValues.hTimeSmp1 = (hDutyV[0] + hDutyV[1] + TDEAD) >> 1;
+    881                  }
+    882                  else
+    883                  {
+    884                    dvDutyValues.hTimeSmp1 = hDutyV[1] - TBEFORE;
+    885                  }
+    886                  // Second point
+    887                  if ((hDutyV[2] - hDutyV[1] - TDEAD)> MAX_TRTS)
+    888                  {
+    889                    dvDutyValues.hTimeSmp2 = (hDutyV[1] + hDutyV[2] + TDEAD) >> 1;
+    890                  }
+    891                  else
+    892                  {
+    893                    dvDutyValues.hTimeSmp2 = hDutyV[2] - TBEFORE;
+    894                  }
+    895                }
+    896                else 
+    897                {
+    898                  // Adjust hDuty
+    899                  hDutyV[0] = dvDutyValues.hTimePhA;
+    900                  hDutyV[1] = dvDutyValues.hTimePhB;
+    901                  hDutyV[2] = dvDutyValues.hTimePhC;
+    902                  
+    903                  // Sort ascendant
+    904                  if (hDutyV[0] > hDutyV[1])
+    905                  {
+    906                    // Swap [0] [1]
+    907                    hDutyV[3] = hDutyV[0];
+    908                    hDutyV[0] = hDutyV[1];
+    909                    hDutyV[1] = hDutyV[3];
+    910                  }
+    911                  if (hDutyV[0] > hDutyV[2])
+    912                  {
+    913                    // Swap [0] [2]
+    914                    hDutyV[3] = hDutyV[0];
+    915                    hDutyV[0] = hDutyV[2];
+    916                    hDutyV[2] = hDutyV[3];
+    917                  }
+    918                  if (hDutyV[1] > hDutyV[2])
+    919                  {
+    920                    // Swap [1] [2]
+    921                    hDutyV[3] = hDutyV[1];
+    922                    hDutyV[1] = hDutyV[2];
+    923                    hDutyV[2] = hDutyV[3];
+    924                  }
+    925                }
+    926                
+    927                if (bStatorFluxPos == BOUNDARY_1) // Two small, one big
+    928                {   
+    929                  // Check after the distortion for sampling space
+    930                  if ((hDutyV[1] - hDutyV[0])< TMIN)
+    931                  {
+    932                    // After the distortion the first sampling point can't be performed
+    933                    // It is necessary to swtch to Boudary 3
+    934                    
+    935                    // Restore the distorted duty
+    936                    if (bInverted_pwm_new == INVERT_A);
+    937                      dvDutyValues.hTimePhA +=HTMIN;
+    938                    if (bInverted_pwm_new == INVERT_B);
+    939                      dvDutyValues.hTimePhB +=HTMIN;
+    940                    if (bInverted_pwm_new == INVERT_C);
+    941                      dvDutyValues.hTimePhC +=HTMIN;
+    942                    
+    943                    // Switch to Boudary 3
+    944                    bStatorFluxPos = BOUNDARY_3;        
+    945                    if (bStBd3 == 0)
+    946                    {
+    947                      bInverted_pwm_new = INVERT_A;
+    948                      dvDutyValues.hTimePhA -=HTMIN;
+    949                      bStBd3 = 1;
+    950                    } 
+    951                    else
+    952                    {
+    953                      bInverted_pwm_new = INVERT_B;
+    954                      dvDutyValues.hTimePhB -=HTMIN;
+    955                      bStBd3 = 0;
+    956                    }
+    957                  }
+    958                  
+    959                  // First point
+    960                  if ((hDutyV[1] - hDutyV[0] - TDEAD)> MAX_TRTS)
+    961                  {
+    962                    dvDutyValues.hTimeSmp1 = (hDutyV[0] + hDutyV[1] + TDEAD) >> 1;
+    963                  }
+    964                  else
+    965                  {
+    966                    dvDutyValues.hTimeSmp1 = hDutyV[1] - TBEFORE;
+    967                  }
+    968                  // Second point
+    969                  dvDutyValues.hTimeSmp2 = PWM_PERIOD - HTMIN + TSAMPLE;
+    970                }
+    971                
+    972                if (bStatorFluxPos == BOUNDARY_2) // Two big, one small
+    973                {
+    974                  // First point
+    975                  if ((hDutyV[2] - hDutyV[1] - TDEAD)>= MAX_TRTS)
+    976                  {
+    977                    dvDutyValues.hTimeSmp1 = (hDutyV[1] + hDutyV[2] + TDEAD) >> 1;
+    978                  }
+    979                  else
+    980                  {
+    981                    dvDutyValues.hTimeSmp1 = hDutyV[2] - TBEFORE;
+    982                  }
+    983                  // Second point
+    984                  dvDutyValues.hTimeSmp2 = PWM_PERIOD - HTMIN + TSAMPLE;
+    985                }
+    986                
+    987                if (bStatorFluxPos == BOUNDARY_3) // 
+    988                {
+    989                  // First point
+    990                  dvDutyValues.hTimeSmp1 = hDutyV[0]-TBEFORE; // Dummy trigger
+    991                  // Second point
+    992                  dvDutyValues.hTimeSmp2 = PWM_PERIOD - HTMIN + TSAMPLE;
+    993                }
+    994              }
+    995              else
+    996              {
+    997                bInverted_pwm_new = INVERT_NONE;
+    998                bStatorFluxPos = REGULAR;
+    999              }
+   1000                  
+   1001              // Update DMA buffer Ch 1,2,3,4 (These value are required before update event)
+   1002              // This buffer is updated using DMA burst
+   1003              hCCRBuff[0] = dvDutyValues.hTimePhA;
+   1004              hCCRBuff[1] = dvDutyValues.hTimePhB;
+   1005              hCCRBuff[2] = dvDutyValues.hTimePhC;
+   1006              hCCRBuff[3] = dvDutyValues.hTimeSmp1;
+   1007              
+   1008          /*******************************************************************************
+   1009          * Function Name  : SVPWM_1ShuntNoPreloadAdj
+   1010          * Description    :  Set the preload variables for PWM mode Ch 1,2,3,4	
+   1011          * Input           : None
+   1012          * Output         : None
+   1013          * Return         : None
+   1014          *******************************************************************************/
+   1015              //SVPWM_1ShuntNoPreloadAdj();
+   1016              // Set the preload vars for PWM mode Ch 1,2,3,4 (these value are required 
+   1017              // inside update event handler
+   1018              switch (bInverted_pwm_new)
+   1019              {
+   1020              case INVERT_A:
+   1021                // Preloads for CCMR
+   1022                hPreloadCCMR1Set = hPreloadCCMR1Disable | CH1TOGGLE | CH2NORMAL;
+   1023                hPreloadCCMR2Set = hPreloadCCMR2Disable | CH3NORMAL | CH4TOGGLE;
+   1024                break;
+   1025              case INVERT_B:
+   1026                // Preloads for CCMR
+   1027                hPreloadCCMR1Set = hPreloadCCMR1Disable | CH1NORMAL | CH2TOGGLE;
+   1028                hPreloadCCMR2Set = hPreloadCCMR2Disable | CH3NORMAL | CH4TOGGLE;
+   1029                break;
+   1030              case INVERT_C:
+   1031                // Preloads for CCMR
+   1032                hPreloadCCMR1Set = hPreloadCCMR1Disable | CH1NORMAL | CH2NORMAL;
+   1033                hPreloadCCMR2Set = hPreloadCCMR2Disable | CH3TOGGLE | CH4TOGGLE;
+   1034                break;
+   1035              default:
+   1036                // Preloads for CCMR
+   1037                hPreloadCCMR1Set = hPreloadCCMR1Disable | CH1NORMAL | CH2NORMAL;
+   1038                hPreloadCCMR2Set = hPreloadCCMR2Disable | CH3NORMAL | CH4NORMAL;
+   1039                break;
+   1040              }
+   1041              
+   1042              // Limit for update event
+   1043              
+   1044              // The following instruction can be executed after Update handler
+   1045              // before the get phase current (Second EOC)
+   1046              
+   1047              // Set the current sampled
+   1048               if (bStatorFluxPos == REGULAR) // Regual zone
+   1049              {  
+   1050                switch (bSector)
+   1051                {
+   1052                case SECTOR_1: // Fisrt after C, Second after B
+   1053                    csCurrentSampled.sampCur1 = SAMP_NIC;
+   1054                    csCurrentSampled.sampCur2 = SAMP_IA;
+   1055                    break;
+   1056                case SECTOR_2: // Fisrt after C, Second after A 
+   1057                    csCurrentSampled.sampCur1 = SAMP_NIC;
+   1058                    csCurrentSampled.sampCur2 = SAMP_IB;
+   1059                    break;
+   1060                case SECTOR_3: // Fisrt after A, Second after C
+   1061                    csCurrentSampled.sampCur1 = SAMP_NIA;
+   1062                    csCurrentSampled.sampCur2 = SAMP_IB;
+   1063                    break;
+   1064                case SECTOR_4: // Fisrt after A, Second after B
+   1065                    csCurrentSampled.sampCur1 = SAMP_NIA;
+   1066                    csCurrentSampled.sampCur2 = SAMP_IC;
+   1067                    break;
+   1068                case SECTOR_5: // Fisrt after B, Second after A
+   1069                    csCurrentSampled.sampCur1 = SAMP_NIB;
+   1070                    csCurrentSampled.sampCur2 = SAMP_IC;
+   1071                    break;
+   1072                case SECTOR_6: // Fisrt after B, Second after C
+   1073                    csCurrentSampled.sampCur1 = SAMP_NIB;
+   1074                    csCurrentSampled.sampCur2 = SAMP_IA;
+   1075                    break;
+   1076                }
+   1077              }
+   1078              
+   1079              if (bStatorFluxPos == BOUNDARY_1) // Two small, one big
+   1080              {
+   1081                switch (bSector)
+   1082                {
+   1083                case SECTOR_1:    // Phase B is adjusted
+   1084                case SECTOR_2:    
+   1085                    csCurrentSampled.sampCur1 = SAMP_NIC;
+   1086                    csCurrentSampled.sampCur2 = SAMP_IB;
+   1087                    break;
+   1088          
+   1089                case SECTOR_3:    // Phase C is adjusted 
+   1090                case SECTOR_4:    
+   1091                    csCurrentSampled.sampCur1 = SAMP_NIA;
+   1092                    csCurrentSampled.sampCur2 = SAMP_IC;
+   1093                    break;
+   1094          
+   1095                case SECTOR_5:   // Phase A is adjusted 
+   1096                case SECTOR_6:    
+   1097                    csCurrentSampled.sampCur1 = SAMP_NIB;
+   1098                    csCurrentSampled.sampCur2 = SAMP_IA;
+   1099                    break;
+   1100                }
+   1101              }
+   1102              
+   1103              if (bStatorFluxPos == BOUNDARY_2) // Two big, one small
+   1104              {
+   1105                switch (bSector)
+   1106                {
+   1107                case SECTOR_2: // Phase A is adjusted
+   1108                case SECTOR_3:
+   1109                    csCurrentSampled.sampCur1 = SAMP_IB;
+   1110                    csCurrentSampled.sampCur2 = SAMP_IA;
+   1111                    break;     
+   1112                case SECTOR_4: // Phase B is adjusted
+   1113                case SECTOR_5:
+   1114                    csCurrentSampled.sampCur1 = SAMP_IC;
+   1115                    csCurrentSampled.sampCur2 = SAMP_IB;
+   1116                    break;  
+   1117                case SECTOR_6: // Phase C is adjusted
+   1118                case SECTOR_1:
+   1119                    csCurrentSampled.sampCur1 = SAMP_IA;
+   1120                    csCurrentSampled.sampCur2 = SAMP_IC;
+   1121                    break;    
+   1122                }
+   1123              }
+   1124              
+   1125              if (bStatorFluxPos == BOUNDARY_3)  
+   1126              {
+   1127                if (bInverted_pwm_new == INVERT_A)
+   1128                {
+   1129                  csCurrentSampled.sampCur1 = SAMP_OLDB;
+   1130                  csCurrentSampled.sampCur2 = SAMP_IA;
+   1131                }
+   1132                if (bInverted_pwm_new == INVERT_B)
+   1133                {
+   1134                  csCurrentSampled.sampCur1 = SAMP_OLDA;
+   1135                  csCurrentSampled.sampCur2 = SAMP_IB;
+   1136                }
+   1137              }
+   1138              
+   1139          	#ifdef CURRENT_COMPENSATION
+   1140          	    // Check for distortion compensation entering Boudary2
+   1141          	    if ((bStatorFluxPosOld == REGULAR) && (bStatorFluxPos == BOUNDARY_2) && (State == RUN))
+   1142          	    {
+   1143          	      bReadDelta = 1;
+   1144          	    }
+   1145          	    else
+   1146          	    {
+   1147          	      bReadDelta = 0;
+   1148          	    }
+   1149          	#endif
+   1150              
+   1151              // Deleting Delta if Stator Pos is no more BOUDARY_2
+   1152              if ((bStatorFluxPosOld == BOUNDARY_2) && (bStatorFluxPos != bStatorFluxPosOld) 
+   1153                  && (State == RUN))
+   1154              {
+   1155                hDeltaA = 0;
+   1156                hDeltaB = 0;
+   1157                hDeltaC = 0;
+   1158              }
+   1159              
+   1160              // Limit for the Get Phase current (Second EOC Handler)
+   1161          }
+   1162          
+   1163          /*******************************************************************************
+   1164          * Function Name  : SVPWM_1ShuntGetPhaseCurrentValues
+   1165          * Description    : This function computes current values of Phase A and Phase B 
+   1166          *                 in q1.15 format starting from values acquired from the A/D 
+   1167          *                 Converter peripheral.
+   1168          * Input          : None
+   1169          * Output         : Stat_Curr_a_b
+   1170          * Return         : None
+   1171          *******************************************************************************/
+   1172          Curr_Components SVPWM_1ShuntGetPhaseCurrentValues(void)
+   1173          {
+   1174              Curr_Components Local_Stator_Currents;
+   1175              s32 wAux;
+   1176              s16 hCurrA = 0, hCurrB = 0, hCurrC = 0;
+   1177              u8 bCurrASamp = 0, bCurrBSamp = 0, bCurrCSamp = 0;
+   1178          
+   1179              
+   1180              if (csCurrentSampled.sampCur1 == SAMP_OLDA)
+   1181              {
+   1182                hCurrA = hCurrAOld;
+   1183                bCurrASamp = 1;
+   1184              }
+   1185              
+   1186              if (csCurrentSampled.sampCur1 == SAMP_OLDB)
+   1187              {
+   1188                hCurrB = hCurrBOld;
+   1189                bCurrBSamp = 1;
+   1190              }
+   1191              
+   1192              // First sampling point
+   1193              wAux =  (s32)(ADC1->JDR2 << 1) - (s32)(hPhaseOffset);
+   1194              
+   1195              switch (csCurrentSampled.sampCur1)
+   1196              {
+   1197              case SAMP_IA:
+   1198              case SAMP_IB:
+   1199              case SAMP_IC:
+   1200                      break;
+   1201              case SAMP_NIA:
+   1202              case SAMP_NIB:
+   1203              case SAMP_NIC:
+   1204                      wAux = -wAux; 
+   1205                      break;
+   1206              default:
+   1207                      wAux = 0;
+   1208              }
+   1209              
+   1210              // Check saturation
+   1211              if (wAux < S16_MIN)
+   1212              {
+   1213                      wAux = S16_MIN;
+   1214              }  
+   1215              else  if (wAux > S16_MAX)
+   1216              { 
+   1217                      wAux = S16_MAX;
+   1218              }
+   1219              else
+   1220              {
+   1221                      wAux = (s16)(wAux);
+   1222              }
+   1223              
+   1224              switch (csCurrentSampled.sampCur1)
+   1225              {
+   1226              case SAMP_IA:
+   1227              case SAMP_NIA:
+   1228                      hCurrA = (s16)(wAux);
+   1229                      bCurrASamp = 1;
+   1230                      break;
+   1231              case SAMP_IB:
+   1232              case SAMP_NIB:
+   1233                      hCurrB = (s16)(wAux);
+   1234                      bCurrBSamp = 1;
+   1235                      break;
+   1236              case SAMP_IC:
+   1237              case SAMP_NIC:
+   1238                      hCurrC = (s16)(wAux);
+   1239                      bCurrCSamp = 1;
+   1240                      break;
+   1241              }
+   1242              
+   1243              // Second sampling point
+   1244              wAux = (s32)(ADC1->JDR1 << 1) - (s32)(hPhaseOffset);
+   1245              
+   1246              switch (csCurrentSampled.sampCur2)
+   1247              {
+   1248              case SAMP_IA:
+   1249              case SAMP_IB:
+   1250              case SAMP_IC:
+   1251                      break;
+   1252              case SAMP_NIA:
+   1253              case SAMP_NIB:
+   1254              case SAMP_NIC:
+   1255                      wAux = -wAux; 
+   1256                      break;
+   1257              default:
+   1258                      wAux = 0;
+   1259              }
+   1260              
+   1261              // Check saturation
+   1262              if (wAux < S16_MIN)
+   1263              {
+   1264                      wAux = S16_MIN;
+   1265              }  
+   1266              else  if (wAux > S16_MAX)
+   1267              { 
+   1268                      wAux = S16_MAX;
+   1269              }
+   1270              else
+   1271              {
+   1272                      wAux = (s16)(wAux);
+   1273              }
+   1274              
+   1275              switch (csCurrentSampled.sampCur2)
+   1276              {
+   1277              case SAMP_IA:
+   1278              case SAMP_NIA:
+   1279                      hCurrA = (s16)(wAux);
+   1280                      bCurrASamp = 1;
+   1281                      break;
+   1282              case SAMP_IB:
+   1283              case SAMP_NIB:
+   1284                      hCurrB = (s16)(wAux);
+   1285                      bCurrBSamp = 1;
+   1286                      break;
+   1287              case SAMP_IC:
+   1288              case SAMP_NIC:
+   1289                      hCurrC = (s16)(wAux);
+   1290                      bCurrCSamp = 1;
+   1291                      break;
+   1292              }
+   1293              
+   1294              // Computation of the third value
+   1295              if (bCurrASamp == 0)
+   1296                      hCurrA = -hCurrB -hCurrC;
+   1297              if (bCurrBSamp == 0)
+   1298                      hCurrB = -hCurrA -hCurrC;
+   1299              if (bCurrCSamp == 0)
+   1300                      hCurrC = -hCurrA -hCurrB;
+   1301              
+   1302              // hCurrA, hCurrB, hCurrC values are the sampled values
+   1303              
+   1304          	#ifdef CURRENT_COMPENSATION
+   1305          	    if (bReadDelta == 1)  
+   1306          	    {
+   1307          	      hDeltaA = hCurrAOld - hCurrA;
+   1308          	      hDeltaB = hCurrBOld - hCurrB;
+   1309          	      hDeltaC = hCurrCOld - hCurrC;
+   1310          	    }
+   1311                
+   1312          	    if (bStatorFluxPos == BOUNDARY_2)
+   1313          	    {
+   1314          	      hCurrA += hDeltaA;
+   1315          	      hCurrB += hDeltaB;
+   1316          	      hCurrC += hDeltaC;
+   1317          	    }
+   1318          	#endif
+   1319              
+   1320              hCurrAOld = hCurrA;
+   1321              hCurrBOld = hCurrB;
+   1322              hCurrCOld = hCurrC;
+   1323          
+   1324              Local_Stator_Currents.qI_Component1 = hCurrA;
+   1325              Local_Stator_Currents.qI_Component2 = hCurrB;
+   1326              
+   1327              return(Local_Stator_Currents); 
+   1328          }
+   1329          
+   1330          /*******************************************************************************
+   1331          * Function Name  : SVPWM_1ShuntAdvCurrentReading
+   1332          * Description    :  It is used to enable or disable the current reading.
+   1333          * Input          : cmd (ENABLE or DISABLE)
+   1334          * Output         : None
+   1335          * Return         : None
+   1336          *******************************************************************************/
+   1337          void SVPWM_1ShuntAdvCurrentReading(FunctionalState cmd)
+   1338          {
+   1339            if (cmd == ENABLE)
+   1340            {
+   1341              // Enable UPDATE ISR
+   1342              // Clear Update Flag
+   1343              TIM_ClearFlag(TIM1, TIM_FLAG_Update);
+   1344              TIM_ITConfig(TIM1, TIM_IT_Update, ENABLE);
+   1345              
+   1346              // Distortion for single shunt enabling
+   1347              bDistEnab = 1;
+   1348            }
+   1349            else
+   1350            {
+   1351              // Disable UPDATE ISR
+   1352              TIM_ITConfig(TIM1, TIM_IT_Update, DISABLE);
+   1353          
+   1354              // Sync ADC trigger with Update
+   1355              ADC_ExternalTrigInjectedConvConfig(ADC1, ADC_ExternalTrigInjecConv_T1_TRGO);
+   1356          
+   1357          	// Enabling the Injectec conversion for ADC1
+   1358            	ADC_ExternalTrigInjectedConvCmd(ADC1,ENABLE);
+   1359              
+   1360              // Clear pending bit and Enable the EOC ISR
+   1361              ADC_ClearFlag(ADC1, ADC_FLAG_JEOC);
+   1362              ADC_ITConfig(ADC1, ADC_IT_JEOC, ENABLE);
+   1363              
+   1364              // Distortion for single shunt disabling
+   1365              bDistEnab = 0;
+   1366              
+   1367              // Disabling the last setting of PWM Mode and Duty Register
+   1368              hPreloadCCMR1Set = hPreloadCCMR1Disable | CH1NORMAL | CH2NORMAL;
+   1369              hPreloadCCMR2Set = hPreloadCCMR2Disable | CH3NORMAL | CH4NORMAL;
+   1370              TIM1->CCMR1 = hPreloadCCMR1Set; // Switch to Normal 
+   1371              TIM1->CCMR2 = hPreloadCCMR2Set; // Switch to Normal
+   1372              
+   1373              // Disabling all DMA previous setting
+   1374              TIM_DMACmd(TIM1, TIM_DMA_CC1, DISABLE);
+   1375              TIM_DMACmd(TIM1, TIM_DMA_CC2, DISABLE);
+   1376              TIM_DMACmd(TIM1, TIM_DMA_CC3, DISABLE);
+   1377              
+   1378              // Set all duty to 50%
+   1379              TIM1->CCR1 = PWM_PERIOD >> 1;
+   1380              TIM1->CCR2 = PWM_PERIOD >> 1;
+   1381              TIM1->CCR3 = PWM_PERIOD >> 1;    
+   1382            }
+   1383          }
+   1384          
+   1385          /*******************************************************************************
+   1386          * Function Name  : SVPWMEOCEvent
+   1387          * Description    :  Routine to be performed inside the end of conversion ISR
+   1388          			store the first sampled value and compute the bus voltage and temperature
+   1389          			sensor sampling  and disable the ext. adc triggering.
+   1390          * Input           : None
+   1391          * Output         : Return false after first EOC, return true after second EOC
+   1392          * Return         : None
+   1393          *******************************************************************************/
+   1394          u8 SVPWMEOCEvent(void)
+   1395          {
+   1396            if (bDistEnab == 1)
+   1397            {
+   1398              // Diabling the Injectec conversion for ADC1
+   1399              ADC_ExternalTrigInjectedConvCmd(ADC1,DISABLE);
+   1400            }
+   1401            
+   1402            // Store the Bus Voltage and temperature sampled values
+   1403            h_ADCTemp = ADC_GetInjectedConversionValue(ADC2,ADC_InjectedChannel_1);
+   1404            h_ADCBusvolt = ADC_GetInjectedConversionValue(ADC2,ADC_InjectedChannel_2);
+   1405            
+   1406            return ((u8)(1));
+   1407          }
+   1408          
+   1409          /*******************************************************************************
+   1410          * Function Name  : SVPWMUpdateEvent
+   1411          * Description    :  Routine to be performed inside the update event ISR. 
+   1412                              It is used to set the PWM output mode of the four channels 
+   1413                              (Toggle or PWM), enable or disable the DMA event for each 
+   1414                              channel, update the DMA buffers, update the DMA lenght and 
+   1415                              finally it re-enables the external ADC triggering.	
+   1416          * Input           : None
+   1417          * Output         : None
+   1418          * Return         : None
+   1419          *******************************************************************************/
+   1420          void SVPWMUpdateEvent(void)
+   1421          {
+   1422            if (bInverted_pwm_new != bInverted_pwm)  
+   1423            {
+   1424              // Critical point start
+   1425              
+   1426              // Update CCMR (OC Mode)
+   1427              TIM1->CCMR1 = hPreloadCCMR1Disable; // Switch to Frozen
+   1428              TIM1->CCMR1 = hPreloadCCMR1Set; // Switch to Normal or Toggle
+   1429              
+   1430              TIM1->CCMR2 = hPreloadCCMR2Disable; // Switch to Frozen
+   1431              TIM1->CCMR2 = hPreloadCCMR2Set; // Switch to Normal or Toggle
+   1432              
+   1433              // Disable DMA (in this period is not inverted)
+   1434              switch (bInverted_pwm)
+   1435              {
+   1436              case INVERT_A:
+   1437                //TIM1_DMACmd(TIM1_DMA_CC1, DISABLE);
+   1438                TIM1->DIER &= ~TIM_DMA_CC1;
+   1439                DMA1_Channel2->CCR &= CCR_ENABLE_Reset;
+   1440                TIM1->CCR1 = hCCRBuff[0];
+   1441                break;
+   1442              case INVERT_B:
+   1443                //TIM1_DMACmd(TIM1_DMA_CC2, DISABLE);
+   1444                TIM1->DIER &= ~TIM_DMA_CC2;
+   1445                DMA1_Channel3->CCR &= CCR_ENABLE_Reset;
+   1446                TIM1->CCR2 = hCCRBuff[1];
+   1447                break;
+   1448              case INVERT_C:
+   1449                //TIM1_DMACmd(TIM1_DMA_CC3, DISABLE);
+   1450                TIM1->DIER &= ~TIM_DMA_CC3;
+   1451                DMA1_Channel6->CCR &= CCR_ENABLE_Reset;
+   1452                TIM1->CCR3 = hCCRBuff[2];
+   1453                break;
+   1454              default:
+   1455                break;
+   1456              }
+   1457              
+   1458              // Enable DMA (in this period channel is toggled)
+   1459              switch (bInverted_pwm_new)
+   1460              {
+   1461              case INVERT_A:
+   1462                DMA1_Channel2->CCR &= CCR_ENABLE_Reset;
+   1463                DMA1_Channel2->CNDTR = 4;
+   1464                DMA1_Channel2->CCR |= CCR_ENABLE_Set;
+   1465                
+   1466                //TIM1_DMACmd(TIM1_DMA_CC1, ENABLE); 
+   1467                TIM1->DIER |= TIM_DMA_CC1;  
+   1468                
+   1469                if (bInverted_pwm_new == INVERT_A)
+   1470                {
+   1471                  if (hCCRBuff[0] <= MINTIMCNTUPHAND)
+   1472                  {
+   1473                    TIM1->CCMR1 = TIM1->CCMR1 & 0xFF8F; // Switch to Frozen Ch1
+   1474                    TIM1->CCMR1 = TIM1->CCMR1 | 0x0040; // Force Low Ch1
+   1475                    TIM1->CCMR1 = TIM1->CCMR1 & 0xFF8F; // Switch to Frozen Ch1
+   1476                    TIM1->CCMR1 = TIM1->CCMR1 | 0x0030; // Switch to Toggle Ch1
+   1477                    
+   1478                    //TIM1_GenerateEvent(TIM1_EventSource_CC1);
+   1479                    TIM1->EGR |= TIM_EventSource_CC1;
+   1480                  }
+   1481                }
+   1482                break;
+   1483                
+   1484              case INVERT_B:
+   1485                DMA1_Channel3->CCR &= CCR_ENABLE_Reset;
+   1486                DMA1_Channel3->CNDTR = 4;
+   1487                DMA1_Channel3->CCR |= CCR_ENABLE_Set;
+   1488                
+   1489                //TIM1_DMACmd(TIM1_DMA_CC2, ENABLE); 
+   1490                TIM1->DIER |= TIM_DMA_CC2;
+   1491                
+   1492                if (bInverted_pwm_new == INVERT_B)
+   1493                {
+   1494                  if (hCCRBuff[1] <= MINTIMCNTUPHAND)
+   1495                  {
+   1496                    TIM1->CCMR1 = TIM1->CCMR1 & 0x8FFF; // Switch to Frozen Ch2
+   1497                    TIM1->CCMR1 = TIM1->CCMR1 | 0x4000; // Force Low Ch2
+   1498                    TIM1->CCMR1 = TIM1->CCMR1 & 0x8FFF; // Switch to Frozen Ch2
+   1499                    TIM1->CCMR1 = TIM1->CCMR1 | 0x3000; // Switch to Toggle Ch2
+   1500                    
+   1501                    //TIM1_GenerateEvent(TIM1_EventSource_CC2);
+   1502                    TIM1->EGR |= TIM_EventSource_CC2;
+   1503                  }
+   1504                }
+   1505                break;
+   1506                
+   1507              case INVERT_C:
+   1508                DMA1_Channel6->CCR &= CCR_ENABLE_Reset;
+   1509                DMA1_Channel6->CNDTR = 4;
+   1510                DMA1_Channel6->CCR |= CCR_ENABLE_Set;
+   1511                
+   1512                //TIM1_DMACmd(TIM1_DMA_CC3, ENABLE);
+   1513                TIM1->DIER |= TIM_DMA_CC3;
+   1514                
+   1515                if (bInverted_pwm_new == INVERT_C)
+   1516                {
+   1517                  if (hCCRBuff[2] <= MINTIMCNTUPHAND)
+   1518                  {
+   1519                    TIM1->CCMR2 = TIM1->CCMR2 & 0xFF8F; // Switch to Frozen Ch3
+   1520                    TIM1->CCMR2 = TIM1->CCMR2 | 0x0040; // Force Low Ch3
+   1521                    TIM1->CCMR2 = TIM1->CCMR2 & 0xFF8F; // Switch to Frozen Ch3
+   1522                    TIM1->CCMR2 = TIM1->CCMR2 | 0x0030; // Switch to Toggle Ch3
+   1523                    
+   1524                    //TIM1_GenerateEvent(TIM1_EventSource_CC3);
+   1525                    TIM1->EGR |= TIM_EventSource_CC3;
+   1526                  }
+   1527                }
+   1528                break;
+   1529                
+   1530              default:
+   1531                break;
+   1532              }
+   1533              
+   1534              // Critical point stop
+   1535              
+   1536              // Adjust the DMA lenght for Ch4
+   1537              //DMA_Cmd(DMA_Channel4, DISABLE);
+   1538              DMA1_Channel4->CCR &= CCR_ENABLE_Reset;
+   1539              if (bInverted_pwm_new == INVERT_NONE)
+   1540              { 
+   1541                // Length 2
+   1542                DMA1_Channel4->CNDTR = 2;
+   1543              }
+   1544              else
+   1545              {
+   1546                // Length 4
+   1547                DMA1_Channel4->CNDTR = 4;
+   1548              }
+   1549              //DMA_Cmd(DMA_Channel4, ENABLE);
+   1550              DMA1_Channel4->CCR |= CCR_ENABLE_Set;
+   1551            }
+   1552            
+   1553            switch (bInverted_pwm_new)
+   1554            {
+   1555            case INVERT_A: 
+   1556              if (hCCRBuff[0] <= DMABURSTMIN_A)
+   1557              {
+   1558                // Reset the status
+   1559                TIM1->CCMR1 = TIM1->CCMR1 & 0xFF8F; // Switch to Frozen Ch1
+   1560                TIM1->CCMR1 = TIM1->CCMR1 | 0x0040; // Force Low Ch1
+   1561                TIM1->CCMR1 = TIM1->CCMR1 & 0xFF8F; // Switch to Frozen Ch1
+   1562                TIM1->CCMR1 = TIM1->CCMR1 | 0x0030; // Switch to Toggle Ch1
+   1563                
+   1564                //TIM1_DMACmd(TIM1_DMA_CC1, ENABLE); 
+   1565                TIM1->DIER |= TIM_DMA_CC1;
+   1566                DMA1_Channel2->CCR &= CCR_ENABLE_Reset;
+   1567                DMA1_Channel2->CNDTR = 4;
+   1568                DMA1_Channel2->CCR |= CCR_ENABLE_Set;
+   1569          
+   1570                TIM_GenerateEvent(TIM1, TIM_EventSource_CC1);
+   1571                
+   1572                if (dvDutyValues.hTimePhA < DMABURSTMIN_A)
+   1573                  dvDutyValues.hTimePhA = DMABURSTMIN_A;
+   1574              }
+   1575              break;  
+   1576                
+   1577            case INVERT_B:
+   1578              if (hCCRBuff[1] <= DMABURSTMIN_B)
+   1579              {
+   1580                // Reset the status
+   1581                TIM1->CCMR1 = TIM1->CCMR1 & 0x8FFF; // Switch to Frozen Ch2
+   1582                TIM1->CCMR1 = TIM1->CCMR1 | 0x4000; // Force Low Ch2
+   1583                TIM1->CCMR1 = TIM1->CCMR1 & 0x8FFF; // Switch to Frozen Ch2
+   1584                TIM1->CCMR1 = TIM1->CCMR1 | 0x3000; // Switch to Toggle Ch2
+   1585                
+   1586                //TIM1_DMACmd(TIM1_DMA_CC2, ENABLE); 
+   1587                TIM1->DIER |= TIM_DMA_CC2;
+   1588                DMA1_Channel3->CCR &= CCR_ENABLE_Reset;
+   1589                DMA1_Channel3->CNDTR = 4;
+   1590                DMA1_Channel3->CCR |= CCR_ENABLE_Set;
+   1591          
+   1592                TIM_GenerateEvent(TIM1, TIM_EventSource_CC2);
+   1593                
+   1594                if (dvDutyValues.hTimePhB < DMABURSTMIN_B)
+   1595                  dvDutyValues.hTimePhB = DMABURSTMIN_B;
+   1596              }
+   1597              break;
+   1598            case INVERT_C: 
+   1599              if (hCCRBuff[2] <= DMABURSTMIN_C)
+   1600              {
+   1601                // Reset the status
+   1602                TIM1->CCMR2 = TIM1->CCMR2 & 0xFF8F; // Switch to Frozen Ch3
+   1603                TIM1->CCMR2 = TIM1->CCMR2 | 0x0040; // Force Low Ch3
+   1604                TIM1->CCMR2 = TIM1->CCMR2 & 0xFF8F; // Switch to Frozen Ch3
+   1605                TIM1->CCMR2 = TIM1->CCMR2 | 0x0030; // Switch to Toggle Ch3
+   1606                
+   1607                //TIM1_DMACmd(TIM1_DMA_CC3, ENABLE); 
+   1608                TIM1->DIER |= TIM_DMA_CC3;
+   1609                DMA1_Channel6->CCR &= CCR_ENABLE_Reset;
+   1610                DMA1_Channel6->CNDTR = 4;
+   1611                DMA1_Channel6->CCR |= CCR_ENABLE_Set;
+   1612          
+   1613                TIM_GenerateEvent(TIM1, TIM_EventSource_CC3);
+   1614                
+   1615                if (dvDutyValues.hTimePhC < DMABURSTMIN_C)
+   1616                  dvDutyValues.hTimePhC = DMABURSTMIN_C;
+   1617              }
+   1618              break;
+   1619            }
+   1620          
+   1621            // Update remaining DMA buffer
+   1622            hCCDmaBuffCh4[0] = dvDutyValues.hTimeSmp2; // Second point 
+   1623            hCCDmaBuffCh4[1] = dvDutyValues.hTimeSmp2;
+   1624            hCCDmaBuffCh4[2] = dvDutyValues.hTimeSmp1; // First point
+   1625            hCCDmaBuffCh4[3] = dvDutyValues.hTimeSmp1;
+   1626            
+   1627            hCCDmaBuffCh1[2] = dvDutyValues.hTimePhA;
+   1628            hCCDmaBuffCh1[3] = dvDutyValues.hTimePhA;
+   1629            
+   1630            hCCDmaBuffCh2[2] = dvDutyValues.hTimePhB;
+   1631            hCCDmaBuffCh2[3] = dvDutyValues.hTimePhB;
+   1632            
+   1633            hCCDmaBuffCh3[2] = dvDutyValues.hTimePhC;
+   1634            hCCDmaBuffCh3[3] = dvDutyValues.hTimePhC;
+   1635            
+   1636            bInverted_pwm = bInverted_pwm_new;
+   1637            
+   1638            /* ADC1 Injected conversions trigger is TIM1 TRGO */ 
+   1639            ADC_ExternalTrigInjectedConvConfig(ADC1, ADC_ExternalTrigInjecConv_T1_CC4); 
+   1640            
+   1641            // Enabling the Injectec conversion for ADC1
+   1642            ADC_ExternalTrigInjectedConvCmd(ADC1,ENABLE);
+   1643          }
+   1644          
+   1645          
+   1646          #endif
+   1647          
+   1648          /******************* (C) COPYRIGHT 2008 STMicroelectronics *****END OF FILE****/  
+
+
+ 
+
+ 
+
+
+Errors: none
+Warnings: none

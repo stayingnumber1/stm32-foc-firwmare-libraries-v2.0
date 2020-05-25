@@ -1,0 +1,6 @@
+-c --cpu Cortex-M3 -D__MICROLIB -g -O3 --apcs=interwork --split_sections -I..\..\STM32F10XFWLIB\inc -I..\inc -I..\
+-I D:\Keil_v5\ARM\RV31\INC
+-I D:\Keil_v5\ARM\PACK\ARM\CMSIS\4.1.1\CMSIS\Include
+-I D:\Keil_v5\ARM\Inc\ST\STM32F10x
+-DVECT_TAB_FLASH
+-o .\obj\stm32f10x_rcc.o --omf_browse .\obj\stm32f10x_rcc.crf --depend .\obj\stm32f10x_rcc.d --feedback ".\Obj\BOOT_FLASH.fed" "..\..\STM32F10XFWLIB\src\stm32f10x_rcc.c"

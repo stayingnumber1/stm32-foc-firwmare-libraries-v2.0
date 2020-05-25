@@ -1,0 +1,671 @@
+###############################################################################
+#                                                                             #
+# IAR ANSI C/C++ Compiler V6.30.1.53127/W32 for ARM     04/Nov/2013  13:19:58 #
+# Copyright 1999-2011 IAR Systems AB.                                         #
+#                                                                             #
+#    Cpu mode     =  thumb                                                    #
+#    Endian       =  little                                                   #
+#    Source file  =  D:\st\stm32 foc firwmare libraries                       #
+#                    v2.0\STM32_FOC_PMSM\src\main.c                           #
+#    Command line =  "D:\st\stm32 foc firwmare libraries                      #
+#                    v2.0\STM32_FOC_PMSM\src\main.c" -D VECT_TAB_FLASH -lCN   #
+#                    "D:\st\stm32 foc firwmare libraries                      #
+#                    v2.0\STM32_FOC_PMSM\EWARM\Debug\List\" --diag_error      #
+#                    Pe068,Pe069 -o "D:\st\stm32 foc firwmare libraries       #
+#                    v2.0\STM32_FOC_PMSM\EWARM\Debug\Obj\" --debug            #
+#                    --endian=little --cpu=Cortex-M3 --fpu=None               #
+#                    --dlib_config D:\IAR\arm\INC\c\DLib_Config_Normal.h -I   #
+#                    "D:\st\stm32 foc firwmare libraries                      #
+#                    v2.0\STM32_FOC_PMSM\EWARM\..\" -I "D:\st\stm32 foc       #
+#                    firwmare libraries v2.0\STM32_FOC_PMSM\EWARM\..\..\STM32 #
+#                    F10XFWLIB\inc\" -I "D:\st\stm32 foc firwmare libraries   #
+#                    v2.0\STM32_FOC_PMSM\EWARM\..\inc\" -Oh --use_c++_inline  #
+#                    --require_prototypes                                     #
+#    List file    =  D:\st\stm32 foc firwmare libraries                       #
+#                    v2.0\STM32_FOC_PMSM\EWARM\Debug\List\main.lst            #
+#    Object file  =  D:\st\stm32 foc firwmare libraries                       #
+#                    v2.0\STM32_FOC_PMSM\EWARM\Debug\Obj\main.o               #
+#                                                                             #
+#                                                                             #
+###############################################################################
+
+D:\st\stm32 foc firwmare libraries v2.0\STM32_FOC_PMSM\src\main.c
+      1          /******************** (C) COPYRIGHT 2008 STMicroelectronics ********************
+      2          * File Name          : main.c
+      3          * Author             : IMS Systems Lab
+      4          * Date First Issued  : 21/11/07
+      5          * Description        : Main program body.
+      6          ********************************************************************************
+      7          * History:
+      8          * 21/11/07 v1.0
+      9          * 29/05/08 v2.0
+     10          * 27/06/08 v2.0.1
+     11          ********************************************************************************
+     12          * THE PRESENT SOFTWARE WHICH IS FOR GUIDANCE ONLY AIMS AT PROVIDING CUSTOMERS
+     13          * WITH CODING INFORMATION REGARDING THEIR PRODUCTS IN ORDER FOR THEM TO SAVE TIME.
+     14          * AS A RESULT, STMICROELECTRONICS SHALL NOT BE HELD LIABLE FOR ANY DIRECT,
+     15          * INDIRECT OR CONSEQUENTIAL DAMAGES WITH RESPECT TO ANY CLAIMS ARISING FROM THE
+     16          * CONTENT OF SUCH SOFTWARE AND/OR THE USE MADE BY CUSTOMERS OF THE CODING
+     17          * INFORMATION CONTAINED HEREIN IN CONNECTION WITH THEIR PRODUCTS.
+     18          *
+     19          * THIS SOURCE CODE IS PROTECTED BY A LICENSE.
+     20          * FOR MORE INFORMATION PLEASE CAREFULLY READ THE LICENSE AGREEMENT FILE LOCATED
+     21          * IN THE ROOT DIRECTORY OF THIS FIRMWARE PACKAGE.
+     22          *******************************************************************************/
+     23          
+     24          /* Includes ------------------------------------------------------------------*/
+     25          #include "stm32f10x_lib.h"
+     26          #include "stm32f10x_MClib.h"
+     27          #include "MC_Globals.h"
+     28          
+     29          /* Private typedef -----------------------------------------------------------*/
+     30          /* Private define ------------------------------------------------------------*/
+     31          /* Private macro -------------------------------------------------------------*/
+     32          /* Private variables ---------------------------------------------------------*/
+     33          /* Private function prototypes -----------------------------------------------*/
+     34          
+     35          void NVIC_Configuration(void);
+     36          void GPIO_Configuration(void);
+     37          void RCC_Configuration(void);
+     38          
+     39          /*******************************************************************************
+     40          * Function Name  : main
+     41          * Description    : Main program.
+     42          * Input          : None
+     43          * Output         : None
+     44          * Return         : None
+     45          *******************************************************************************/
+
+   \                                 In section .text, align 2, keep-with-next
+     46          int main(void)
+     47          {
+   \                     main:
+   \   00000000   0xE92D 0x43F8      PUSH     {R3-R9,LR}
+     48          #ifdef DEBUG
+     49            debug();
+     50          #endif
+     51            
+     52            NVIC_Configuration();   
+   \   00000004   0x2100             MOVS     R1,#+0
+   \   00000006   0xF04F 0x6000      MOV      R0,#+134217728
+   \   0000000A   0x.... 0x....      BL       NVIC_SetVectorTable
+     53            RCC_Configuration();
+   \   0000000E   0x.... 0x....      BL       RCC_Configuration
+     54            GPIO_Configuration();
+   \   00000012   0x.... 0x....      BL       GPIO_Configuration
+     55            
+     56          #ifdef THREE_SHUNT  
+     57            SVPWM_3ShuntInit();
+   \   00000016   0x.... 0x....      BL       SVPWM_3ShuntInit
+     58          #elif defined ICS_SENSORS
+     59            SVPWM_IcsInit();
+     60          #elif defined SINGLE_SHUNT
+     61            SVPWM_1ShuntInit();
+     62          #endif
+     63            
+     64          #ifdef ENCODER
+     65             ENC_Init();
+     66             #ifdef OBSERVER_GAIN_TUNING
+     67                STO_StateObserverInterface_Init();
+     68                STO_Init();
+     69             #endif
+     70          #elif defined HALL_SENSORS
+     71             HALL_HallTimerInit();
+     72             #ifdef OBSERVER_GAIN_TUNING
+     73                STO_StateObserverInterface_Init();
+     74                STO_Init();
+     75             #endif
+     76          #elif defined NO_SPEED_SENSORS
+     77              STO_StateObserverInterface_Init();
+   \   0000001A   0x.... 0x....      BL       STO_StateObserverInterface_Init
+     78              STO_Init();
+   \   0000001E   0x.... 0x....      BL       STO_Init
+     79             #ifdef VIEW_ENCODER_FEEDBACK
+     80                ENC_Init();
+   \   00000022   0x.... 0x....      BL       ENC_Init
+     81             #elif defined VIEW_HALL_FEEDBACK
+     82                HALL_HallTimerInit();
+     83             #endif
+     84          #endif
+     85          
+     86          #ifdef DAC_FUNCTIONALITY   
+     87            MCDAC_Init();
+   \   00000026   0x.... 0x....      BL       MCDAC_Init
+     88          #endif
+     89          
+     90            TB_Init();
+   \   0000002A   0x.... 0x....      BL       TB_Init
+     91            
+     92            PID_Init(&PID_Torque_InitStructure, &PID_Flux_InitStructure, &PID_Speed_InitStructure);
+   \   0000002E   0x....             LDR.N    R2,??DataTable1
+   \   00000030   0x....             LDR.N    R1,??DataTable1_1
+   \   00000032   0x....             LDR.N    R0,??DataTable1_2
+   \   00000034   0x.... 0x....      BL       PID_Init
+     93          
+     94          #ifdef BRAKE_RESISTOR
+     95              MCL_Brake_Init();
+     96          #endif
+     97                
+     98            KEYS_Init();
+   \   00000038   0x.... 0x....      BL       KEYS_Init
+     99            
+    100            /* TIM1 Counter Clock stopped when the core is halted */
+    101            DBGMCU_Config(DBGMCU_TIM1_STOP, ENABLE);
+   \   0000003C   0x2101             MOVS     R1,#+1
+   \   0000003E   0xF44F 0x6080      MOV      R0,#+1024
+   \   00000042   0x.... 0x....      BL       DBGMCU_Config
+    102            
+    103            // Init Bus voltage and Temperature average  
+    104            MCL_Init_Arrays();
+   \   00000046   0x.... 0x....      BL       MCL_Init_Arrays
+    105              
+    106            LCD_Init();
+   \   0000004A   0x.... 0x....      BL       LCD_Init
+    107            LCD_Clear(White);
+   \   0000004E   0xF64F 0x74FF      MOVW     R4,#+65535
+   \   00000052   0x4620             MOV      R0,R4
+   \   00000054   0x.... 0x....      BL       LCD_Clear
+    108            LCD_SetTextColor(Blue);
+   \   00000058   0x201F             MOVS     R0,#+31
+   \   0000005A   0x.... 0x....      BL       LCD_SetTextColor
+    109            LCD_SetBackColor(White);
+   \   0000005E   0x4620             MOV      R0,R4
+   \   00000060   0x.... 0x....      BL       LCD_SetBackColor
+    110              
+    111            Display_Welcome_Message();
+   \   00000064   0x.... 0x....      BL       Display_Welcome_Message
+   \   00000068   0xF640 0x38B8      MOVW     R8,#+3000
+   \   0000006C   0x....             LDR.N    R5,??DataTable1_3
+   \   0000006E   0x.... 0x....      LDR.W    R9,??DataTable1_4  ;; 0x40012c00
+   \   00000072   0x....             LDR.N    R7,??DataTable1_5
+   \   00000074   0x....             LDR.N    R4,??DataTable1_6
+   \   00000076   0x....             LDR.N    R6,??DataTable1_7
+   \   00000078   0xE006             B.N      ??main_0
+    112              
+    113            while(1)
+    114            { 
+    115              Display_LCD();
+    116              MCL_ChkPowerStage();    
+    117              //User interface management    
+    118              KEYS_process();  
+    119            
+    120              switch (State)
+    121              {
+    122                case IDLE:    // Idle state   
+    123                break;
+    124                
+    125                case INIT:
+    126                  MCL_Init();
+   \                     ??main_1:
+   \   0000007A   0x.... 0x....      BL       MCL_Init
+    127                  TB_Set_StartUp_Timeout(3000);
+   \   0000007E   0x4640             MOV      R0,R8
+   \   00000080   0x.... 0x....      BL       TB_Set_StartUp_Timeout
+    128                  State = START; 
+   \   00000084   0x2002             MOVS     R0,#+2
+   \                     ??main_2:
+   \   00000086   0x7030             STRB     R0,[R6, #+0]
+    129                break;
+   \                     ??main_0:
+   \   00000088   0x.... 0x....      BL       Display_LCD
+   \   0000008C   0x.... 0x....      BL       MCL_ChkPowerStage
+   \   00000090   0x.... 0x....      BL       KEYS_process
+   \   00000094   0x7830             LDRB     R0,[R6, #+0]
+   \   00000096   0x2801             CMP      R0,#+1
+   \   00000098   0xD0EF             BEQ.N    ??main_1
+   \   0000009A   0x2804             CMP      R0,#+4
+   \   0000009C   0xD004             BEQ.N    ??main_3
+   \   0000009E   0x2806             CMP      R0,#+6
+   \   000000A0   0xD01B             BEQ.N    ??main_4
+   \   000000A2   0x2807             CMP      R0,#+7
+   \   000000A4   0xD021             BEQ.N    ??main_5
+   \   000000A6   0xE7EF             B.N      ??main_0
+    130                  
+    131                case START:  
+    132                //passage to state RUN is performed by startup functions; 
+    133                break;
+    134                    
+    135                case RUN:   // motor running       
+    136          #ifdef ENCODER
+    137                  if(ENC_ErrorOnFeedback() == TRUE)
+    138                  {
+    139                    MCL_SetFault(SPEED_FEEDBACK);
+    140                  }
+    141          #elif defined HALL_SENSORS        
+    142                  if(HALL_IsTimedOut())
+    143                  {
+    144                    MCL_SetFault(SPEED_FEEDBACK);
+    145                  } 
+    146                  if (HALL_GetSpeed() == HALL_MAX_SPEED)
+    147                  {
+    148                    MCL_SetFault(SPEED_FEEDBACK);
+    149                  } 
+    150          #elif defined NO_SPEED_SENSORS
+    151                
+    152          #endif     
+    153                break;  
+    154                
+    155                case STOP:    // motor stopped
+    156                    // shutdown power         
+    157                    /* Main PWM Output Disable */
+    158                    TIM_CtrlPWMOutputs(TIM1, DISABLE);
+   \                     ??main_3:
+   \   000000A8   0x2100             MOVS     R1,#+0
+   \   000000AA   0x4648             MOV      R0,R9
+   \   000000AC   0x.... 0x....      BL       TIM_CtrlPWMOutputs
+    159                    
+    160                    State = WAIT;
+   \   000000B0   0x2006             MOVS     R0,#+6
+   \   000000B2   0x7030             STRB     R0,[R6, #+0]
+    161                    
+    162          #ifdef THREE_SHUNT          
+    163                    SVPWM_3ShuntAdvCurrentReading(DISABLE);
+   \   000000B4   0x2000             MOVS     R0,#+0
+   \   000000B6   0x.... 0x....      BL       SVPWM_3ShuntAdvCurrentReading
+    164          #endif   
+    165          #ifdef SINGLE_SHUNT          
+    166                    SVPWM_1ShuntAdvCurrentReading(DISABLE);
+    167          #endif
+    168                    Stat_Volt_alfa_beta.qV_Component1 = Stat_Volt_alfa_beta.qV_Component2 = 0;
+   \   000000BA   0x2000             MOVS     R0,#+0
+   \   000000BC   0x8068             STRH     R0,[R5, #+2]
+   \   000000BE   0x8028             STRH     R0,[R5, #+0]
+   \   000000C0   0xA800             ADD      R0,SP,#+0
+   \   000000C2   0x2100             MOVS     R1,#+0
+   \   000000C4   0x8001             STRH     R1,[R0, #+0]
+   \   000000C6   0x8869             LDRH     R1,[R5, #+2]
+   \   000000C8   0x8041             STRH     R1,[R0, #+2]
+    169                    
+    170          #ifdef ICS_SENSORS
+    171                    SVPWM_IcsCalcDutyCycles(Stat_Volt_alfa_beta);
+    172          #elif defined THREE_SHUNT
+    173                    SVPWM_3ShuntCalcDutyCycles(Stat_Volt_alfa_beta);
+   \   000000CA   0x9800             LDR      R0,[SP, #+0]
+   \   000000CC   0x.... 0x....      BL       SVPWM_3ShuntCalcDutyCycles
+    174          #endif                                                
+    175                    TB_Set_Delay_500us(2000); // 1 sec delay
+   \   000000D0   0xF44F 0x60FA      MOV      R0,#+2000
+   \   000000D4   0x.... 0x....      BL       TB_Set_Delay_500us
+    176                break;
+   \   000000D8   0xE7D6             B.N      ??main_0
+    177                
+    178                case WAIT:    // wait state
+    179                    if (TB_Delay_IsElapsed() == TRUE) 
+   \                     ??main_4:
+   \   000000DA   0x.... 0x....      BL       TB_Delay_IsElapsed
+   \   000000DE   0x2801             CMP      R0,#+1
+   \   000000E0   0xD1D2             BNE.N    ??main_0
+    180                    {
+    181          #ifdef ENCODER            
+    182                      if(ENC_Get_Mechanical_Speed() ==0)             
+    183                      {              
+    184                        State = IDLE;              
+    185                      }
+    186          #elif defined HALL_SENSORS      
+    187                      if (HALL_IsTimedOut())
+    188                      {               
+    189                        State=IDLE;
+    190                      } 
+    191          #elif defined NO_SPEED_SENSORS
+    192                      STO_InitSpeedBuffer();
+   \   000000E2   0x.... 0x....      BL       STO_InitSpeedBuffer
+    193                      State=IDLE; 
+   \   000000E6   0x2000             MOVS     R0,#+0
+   \   000000E8   0xE7CD             B.N      ??main_2
+    194          #endif            
+    195                    }
+    196                  break;
+    197              
+    198                case FAULT:                   
+    199                    if (MCL_ClearFault() == TRUE)
+   \                     ??main_5:
+   \   000000EA   0x.... 0x....      BL       MCL_ClearFault
+   \   000000EE   0x2801             CMP      R0,#+1
+   \   000000F0   0xD1CA             BNE.N    ??main_0
+    200                    {
+    201                      if(wGlobal_Flags & SPEED_CONTROL == SPEED_CONTROL)
+   \   000000F2   0x6820             LDR      R0,[R4, #+0]
+   \   000000F4   0x07C0             LSLS     R0,R0,#+31
+   \   000000F6   0xBF4C             ITE      MI 
+   \   000000F8   0x2000             MOVMI    R0,#+0
+   \   000000FA   0x200C             MOVPL    R0,#+12
+    202                      {
+    203                        bMenu_index = CONTROL_MODE_MENU_1;
+    204                      }
+    205                      else
+    206                      {
+    207                        bMenu_index = CONTROL_MODE_MENU_6;
+   \   000000FC   0x7038             STRB     R0,[R7, #+0]
+    208                      }       
+    209          #if defined NO_SPEED_SENSORS
+    210                      STO_InitSpeedBuffer();
+   \   000000FE   0x.... 0x....      BL       STO_InitSpeedBuffer
+    211          #endif            
+    212                      State = IDLE;
+   \   00000102   0x2000             MOVS     R0,#+0
+   \   00000104   0x7030             STRB     R0,[R6, #+0]
+    213                      wGlobal_Flags |= FIRST_START;
+   \   00000106   0x6820             LDR      R0,[R4, #+0]
+   \   00000108   0xF040 0x0002      ORR      R0,R0,#0x2
+   \   0000010C   0x6020             STR      R0,[R4, #+0]
+   \   0000010E   0xE7BB             B.N      ??main_0
+    214                    }
+    215                  break;
+    216              
+    217                default:        
+    218                  break;
+    219              }
+    220            }
+    221          }
+    222          
+    223          /*******************************************************************************
+    224          * Function Name  : GPIO_Configuration
+    225          * Description    : Configures the TIM1 Pins.
+    226          * Input          : None
+    227          * Output         : None
+    228          * Return         : None
+    229          *******************************************************************************/
+
+   \                                 In section .text, align 2, keep-with-next
+    230          void GPIO_Configuration(void)
+    231          {
+   \                     GPIO_Configuration:
+   \   00000000   0xB510             PUSH     {R4,LR}
+   \   00000002   0xB082             SUB      SP,SP,#+8
+    232            GPIO_InitTypeDef GPIO_InitStructure;
+    233          
+    234            /* Enable GPIOC clock */
+    235            RCC_APB2PeriphClockCmd( RCC_APB2Periph_GPIOC, ENABLE);
+   \   00000004   0x2101             MOVS     R1,#+1
+   \   00000006   0x2010             MOVS     R0,#+16
+   \   00000008   0x.... 0x....      BL       RCC_APB2PeriphClockCmd
+    236          
+    237            GPIO_DeInit(GPIOC);
+   \   0000000C   0x....             LDR.N    R4,??DataTable1_8  ;; 0x40011000
+   \   0000000E   0x4620             MOV      R0,R4
+   \   00000010   0x.... 0x....      BL       GPIO_DeInit
+    238            GPIO_StructInit(&GPIO_InitStructure);
+   \   00000014   0xA800             ADD      R0,SP,#+0
+   \   00000016   0x.... 0x....      BL       GPIO_StructInit
+    239                            
+    240            /* Configure PC.06, PC.07, PC.08 and PC.09 as Output push-pull for debugging
+    241               purposes */
+    242            GPIO_InitStructure.GPIO_Pin = GPIO_Pin_6 | GPIO_Pin_7 | GPIO_Pin_8 | GPIO_Pin_9;
+   \   0000001A   0xF44F 0x7070      MOV      R0,#+960
+   \   0000001E   0xF8AD 0x0000      STRH     R0,[SP, #+0]
+    243            GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
+   \   00000022   0x2001             MOVS     R0,#+1
+   \   00000024   0xF88D 0x0002      STRB     R0,[SP, #+2]
+    244            GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;
+   \   00000028   0x2010             MOVS     R0,#+16
+   \   0000002A   0xF88D 0x0003      STRB     R0,[SP, #+3]
+    245            GPIO_Init(GPIOC, &GPIO_InitStructure);    
+   \   0000002E   0xA900             ADD      R1,SP,#+0
+   \   00000030   0x4620             MOV      R0,R4
+   \   00000032   0x.... 0x....      BL       GPIO_Init
+    246          }
+   \   00000036   0xBD13             POP      {R0,R1,R4,PC}    ;; return
+    247          
+    248          /*******************************************************************************
+    249          * Function Name  : RCC_Configuration
+    250          * Description    : Configures the different system clocks.
+    251          * Input          : None
+    252          * Output         : None
+    253          * Return         : None
+    254          *******************************************************************************/
+
+   \                                 In section .text, align 2, keep-with-next
+    255          void RCC_Configuration(void)
+    256          { 
+   \                     RCC_Configuration:
+   \   00000000   0xB580             PUSH     {R7,LR}
+    257            ErrorStatus HSEStartUpStatus;
+    258          
+    259            /* RCC system reset(for debug purpose) */
+    260            RCC_DeInit();
+   \   00000002   0x.... 0x....      BL       RCC_DeInit
+    261          
+    262            /* Enable HSE */
+    263            RCC_HSEConfig(RCC_HSE_ON);
+   \   00000006   0xF44F 0x3080      MOV      R0,#+65536
+   \   0000000A   0x.... 0x....      BL       RCC_HSEConfig
+    264          
+    265            /* Wait till HSE is ready */
+    266            HSEStartUpStatus = RCC_WaitForHSEStartUp();
+    267            
+    268            if(HSEStartUpStatus == SUCCESS)
+   \   0000000E   0x.... 0x....      BL       RCC_WaitForHSEStartUp
+   \   00000012   0x2801             CMP      R0,#+1
+   \   00000014   0xD124             BNE.N    ??RCC_Configuration_0
+    269            {
+    270              /* HCLK = SYSCLK */
+    271              RCC_HCLKConfig(RCC_SYSCLK_Div1); 
+   \   00000016   0x2000             MOVS     R0,#+0
+   \   00000018   0x.... 0x....      BL       RCC_HCLKConfig
+    272            
+    273              /* PCLK2 = HCLK */
+    274              RCC_PCLK2Config(RCC_HCLK_Div1); 
+   \   0000001C   0x2000             MOVS     R0,#+0
+   \   0000001E   0x.... 0x....      BL       RCC_PCLK2Config
+    275          
+    276              /* PCLK1 = HCLK/2 */
+    277              RCC_PCLK1Config(RCC_HCLK_Div2);
+   \   00000022   0xF44F 0x6080      MOV      R0,#+1024
+   \   00000026   0x.... 0x....      BL       RCC_PCLK1Config
+    278          
+    279              /* Flash 2 wait state */
+    280              FLASH_SetLatency(FLASH_Latency_2);
+   \   0000002A   0x2002             MOVS     R0,#+2
+   \   0000002C   0x.... 0x....      BL       FLASH_SetLatency
+    281              /* Enable Prefetch Buffer */
+    282              FLASH_PrefetchBufferCmd(FLASH_PrefetchBuffer_Enable);
+   \   00000030   0x2010             MOVS     R0,#+16
+   \   00000032   0x.... 0x....      BL       FLASH_PrefetchBufferCmd
+    283          
+    284              /* PLLCLK = 8MHz * 9 = 72 MHz */
+    285              RCC_PLLConfig(RCC_PLLSource_HSE_Div1, RCC_PLLMul_9);
+   \   00000036   0xF44F 0x11E0      MOV      R1,#+1835008
+   \   0000003A   0xF44F 0x3080      MOV      R0,#+65536
+   \   0000003E   0x.... 0x....      BL       RCC_PLLConfig
+    286          
+    287              /* Enable PLL */ 
+    288              RCC_PLLCmd(ENABLE);
+   \   00000042   0x2001             MOVS     R0,#+1
+   \   00000044   0x.... 0x....      BL       RCC_PLLCmd
+    289          
+    290              /* Wait till PLL is ready */
+    291              while(RCC_GetFlagStatus(RCC_FLAG_PLLRDY) == RESET)
+   \                     ??RCC_Configuration_1:
+   \   00000048   0x2039             MOVS     R0,#+57
+   \   0000004A   0x.... 0x....      BL       RCC_GetFlagStatus
+   \   0000004E   0x2800             CMP      R0,#+0
+   \   00000050   0xD0FA             BEQ.N    ??RCC_Configuration_1
+    292              {
+    293              }
+    294          
+    295              /* Select PLL as system clock source */
+    296              RCC_SYSCLKConfig(RCC_SYSCLKSource_PLLCLK);
+   \   00000052   0x2002             MOVS     R0,#+2
+   \   00000054   0x.... 0x....      BL       RCC_SYSCLKConfig
+    297          
+    298              /* Wait till PLL is used as system clock source */
+    299              while(RCC_GetSYSCLKSource() != 0x08)
+   \                     ??RCC_Configuration_2:
+   \   00000058   0x.... 0x....      BL       RCC_GetSYSCLKSource
+   \   0000005C   0x2808             CMP      R0,#+8
+   \   0000005E   0xD1FB             BNE.N    ??RCC_Configuration_2
+    300              {
+    301              }
+    302            }
+    303          }
+   \                     ??RCC_Configuration_0:
+   \   00000060   0xBD01             POP      {R0,PC}          ;; return
+    304          
+    305          /*******************************************************************************
+    306          * Function Name  : NVIC_Configuration
+    307          * Description    : Configures the Vector Table base address.
+    308          * Input          : None
+    309          * Output         : None
+    310          * Return         : None
+    311          *******************************************************************************/
+
+   \                                 In section .text, align 2, keep-with-next
+    312          void NVIC_Configuration(void)
+    313          {
+    314          #ifdef  VECT_TAB_RAM  
+    315            /* Set the Vector Table base location at 0x20000000 */ 
+    316            NVIC_SetVectorTable(NVIC_VectTab_RAM, 0x0); 
+    317          #else  /* VECT_TAB_FLASH  */
+    318            /* Set the Vector Table base location at 0x08000000 */ 
+    319            NVIC_SetVectorTable(NVIC_VectTab_FLASH, 0x0);   
+   \                     NVIC_Configuration:
+   \   00000000   0x2100             MOVS     R1,#+0
+   \   00000002   0xF04F 0x6000      MOV      R0,#+134217728
+   \   00000006   0x.... 0x....      B.W      NVIC_SetVectorTable
+    320          #endif
+    321          }
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1:
+   \   00000000   0x........         DC32     PID_Speed_InitStructure
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_1:
+   \   00000000   0x........         DC32     PID_Flux_InitStructure
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_2:
+   \   00000000   0x........         DC32     PID_Torque_InitStructure
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_3:
+   \   00000000   0x........         DC32     Stat_Volt_alfa_beta
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_4:
+   \   00000000   0x40012C00         DC32     0x40012c00
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_5:
+   \   00000000   0x........         DC32     bMenu_index
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_6:
+   \   00000000   0x........         DC32     wGlobal_Flags
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_7:
+   \   00000000   0x........         DC32     State
+
+   \                                 In section .text, align 4, keep-with-next
+   \                     ??DataTable1_8:
+   \   00000000   0x40011000         DC32     0x40011000
+    322          
+    323          #ifdef  DEBUG
+    324          /*******************************************************************************
+    325          * Function Name  : assert_failed
+    326          * Description    : Reports the name of the source file and the source line number
+    327          *                  where the assert_param error has occurred.
+    328          * Input          : - file: pointer to the source file name
+    329          *                  - line: assert_param error line source number
+    330          * Output         : None
+    331          * Return         : None
+    332          *******************************************************************************/
+    333          void assert_failed(u8* file, u32 line)
+    334          { 
+    335            /* User can add his own implementation to report the file name and line number,
+    336               ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+    337          
+    338            /* Infinite loop */
+    339            while (1)
+    340            {
+    341              //printf("Wrong parameters value: file %s on line %d\r\n", file, line);
+    342            }
+    343          }
+    344          #endif
+    345          
+    346          /******************* (C) COPYRIGHT 2008 STMicroelectronics *****END OF FILE****/
+
+   Maximum stack usage in bytes:
+
+   .cstack Function
+   ------- --------
+       16  GPIO_Configuration
+             16 -> GPIO_DeInit
+             16 -> GPIO_Init
+             16 -> GPIO_StructInit
+             16 -> RCC_APB2PeriphClockCmd
+        0  NVIC_Configuration
+              0 -> NVIC_SetVectorTable
+        8  RCC_Configuration
+              8 -> FLASH_PrefetchBufferCmd
+              8 -> FLASH_SetLatency
+              8 -> RCC_DeInit
+              8 -> RCC_GetFlagStatus
+              8 -> RCC_GetSYSCLKSource
+              8 -> RCC_HCLKConfig
+              8 -> RCC_HSEConfig
+              8 -> RCC_PCLK1Config
+              8 -> RCC_PCLK2Config
+              8 -> RCC_PLLCmd
+              8 -> RCC_PLLConfig
+              8 -> RCC_SYSCLKConfig
+              8 -> RCC_WaitForHSEStartUp
+       32  main
+             32 -> DBGMCU_Config
+             32 -> Display_LCD
+             32 -> Display_Welcome_Message
+             32 -> ENC_Init
+             32 -> GPIO_Configuration
+             32 -> KEYS_Init
+             32 -> KEYS_process
+             32 -> LCD_Clear
+             32 -> LCD_Init
+             32 -> LCD_SetBackColor
+             32 -> LCD_SetTextColor
+             32 -> MCDAC_Init
+             32 -> MCL_ChkPowerStage
+             32 -> MCL_ClearFault
+             32 -> MCL_Init
+             32 -> MCL_Init_Arrays
+             32 -> NVIC_SetVectorTable
+             32 -> PID_Init
+             32 -> RCC_Configuration
+             32 -> STO_Init
+             32 -> STO_InitSpeedBuffer
+             32 -> STO_StateObserverInterface_Init
+             32 -> SVPWM_3ShuntAdvCurrentReading
+             32 -> SVPWM_3ShuntCalcDutyCycles
+             32 -> SVPWM_3ShuntInit
+             32 -> TB_Delay_IsElapsed
+             32 -> TB_Init
+             32 -> TB_Set_Delay_500us
+             32 -> TB_Set_StartUp_Timeout
+             32 -> TIM_CtrlPWMOutputs
+
+
+   Section sizes:
+
+   Bytes  Function/Label
+   -----  --------------
+       4  ??DataTable1
+       4  ??DataTable1_1
+       4  ??DataTable1_2
+       4  ??DataTable1_3
+       4  ??DataTable1_4
+       4  ??DataTable1_5
+       4  ??DataTable1_6
+       4  ??DataTable1_7
+       4  ??DataTable1_8
+      56  GPIO_Configuration
+      10  NVIC_Configuration
+      98  RCC_Configuration
+     272  main
+
+ 
+ 472 bytes in section .text
+ 
+ 472 bytes of CODE memory
+
+Errors: none
+Warnings: 4
